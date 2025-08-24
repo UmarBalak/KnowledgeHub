@@ -1,16 +1,16 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import RedirectResponse
-from starlette.config import Config
 import httpx
 import urllib.parse
-
-config = Config(".env")
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
 app = FastAPI()
 
-GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = config("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = config("GOOGLE_REDIRECT_URI")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
 
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
