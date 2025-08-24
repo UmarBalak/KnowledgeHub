@@ -2,6 +2,7 @@ import os
 from typing import Optional, List, Mapping, Any, Dict
 from dotenv import load_dotenv
 from langchain_together import ChatTogether
+from requests.exceptions import RequestException
 
 load_dotenv()
 
@@ -45,13 +46,11 @@ class LLM():
             )
             response = llm_model.invoke(prompt, stop=stop)
             return self.normalize_ai_message(response)
-        
+        except RequestException as e:
+            if "429" in str(e):  # Rate limit error
+                print("Rate limit exceeded after all retries")
+                raise RuntimeError("Rate limit exceeded, please try again later") from e
+            
         except Exception as e:
-            print(f"Error generating LLM response with TogetherAI: {e}")
-            raise
-
-# Example usage in LangChain pipeline:
-llm = LLM()
-response = llm.invoke("Hello, how are you?")
-print(response["content"])
-
+            print(f"Unexpected error generating LLM response: {str(e)}")
+            raise RuntimeError(f"Unexpected error: {str(e)}") from e
