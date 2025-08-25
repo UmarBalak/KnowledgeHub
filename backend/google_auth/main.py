@@ -8,6 +8,10 @@ from models import User
 from sqlalchemy.orm import Session
 import jwt
 from datetime import datetime, timedelta
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 Base.metadata.create_all(bind=engine)
@@ -54,6 +58,7 @@ def read_root():
 
 @app.get("/auth/google/login")
 def login():
+    logging.info("Initiating Google OAuth2 login")
     auth_url = (
         GOOGLE_AUTH_ENDPOINT
         + "?"
@@ -66,10 +71,12 @@ def login():
             "prompt": "consent",
         })
     )
+    logging.info(f"Redirecting to Google OAuth2 URL: {auth_url}")
     return RedirectResponse(auth_url)
 
 @app.get("/auth/google/callback")
 async def callback(code: str, db: Session = Depends(get_db)):
+    logging.info(f"Entered callback with code: {code}")
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
             GOOGLE_TOKEN_ENDPOINT,
@@ -93,10 +100,15 @@ async def callback(code: str, db: Session = Depends(get_db)):
         )
     if userinfo_response.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to fetch user info")
-    user_info = userinfo_response.json()
     
+    user_info = userinfo_response.json()
+    logging.info("Fetched user info successfully")
+
     user = db.query(User).filter(User.id == user_info["id"]).first()
+    logging.info(f"User lookup result: {user}")
+
     if not user:
+        logging.info("User not found. Creating new user in the database")
         user = User(
             id=user_info["id"],
             email=user_info["email"],
@@ -106,8 +118,10 @@ async def callback(code: str, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
         db.refresh(user)
+        logging.info(f"Created new user: {user.email}")
 
     # Create JWT for user and redirect to frontend with token
     token = create_access_token({"sub": user.id, "email": user.email, "name": user.name})
     redirect_uri = f"{FRONTEND_URL}/callback?token={token}"
+    logging.info(f"Redirecting to: {redirect_uri}")
     return RedirectResponse(redirect_uri)
