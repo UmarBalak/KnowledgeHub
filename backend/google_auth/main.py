@@ -33,6 +33,10 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+@app.get("/health")
+def read_root():
+    return {"message": "API is healthy"}
+
 @app.get("/auth/google/login")
 def login():
     auth_url = (
