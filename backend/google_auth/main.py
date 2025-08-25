@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 import httpx, os, urllib.parse
 from dotenv import load_dotenv
@@ -24,6 +25,20 @@ GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v2/userinfo"
 SCOPES = ["openid", "email", "profile"]
+
+origins = [
+    "http://localhost:3000",
+    FRONTEND_URL,
+]
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 # JWT utility
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1)):
@@ -94,5 +109,5 @@ async def callback(code: str, db: Session = Depends(get_db)):
 
     # Create JWT for user and redirect to frontend with token
     token = create_access_token({"sub": user.id, "email": user.email, "name": user.name})
-    redirect_uri = f"{FRONTEND_URL}?token={token}"
+    redirect_uri = f"{FRONTEND_URL}/callback?token={token}"
     return RedirectResponse(redirect_uri)
