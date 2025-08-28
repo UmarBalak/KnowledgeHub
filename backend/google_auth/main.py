@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 import jwt
 from datetime import datetime, timedelta
 import logging
+from starlette.responses import JSONResponse, Response
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -52,9 +53,19 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-@app.get("/health")
-def read_root():
-    return {"message": "API is healthy"}
+@app.get("/health", response_class=JSONResponse)
+async def health_check():
+    """
+    Health check endpoint to verify service availability.
+    """
+    return {"status": "healthy"}
+
+@app.head("/health")
+async def health_check_monitor():
+    """
+    Health check endpoint to verify service availability.
+    """
+    return Response(status_code=200)
 
 @app.get("/auth/google/login")
 def login():
