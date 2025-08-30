@@ -75,7 +75,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     except jwt.PyJWTError:
         raise credentials_exception
     
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.google_id == user_id).first()
     if user is None:
         raise credentials_exception
     return user
@@ -146,13 +146,13 @@ async def callback(code: str, db: Session = Depends(get_db)):
     user_info = userinfo_response.json()
     logging.info("Fetched user info successfully")
 
-    user = db.query(User).filter(User.id == user_info["id"]).first()
+    user = db.query(User).filter(User.google_id == user_info["id"]).first()
     logging.info(f"User lookup result: {user}")
 
     if not user:
         logging.info("User not found. Creating new user in the database")
         user = User(
-            id=user_info["id"],
+            google_id=user_info["id"],
             email=user_info["email"],
             name=user_info.get("name", ""),
             picture=user_info.get("picture", "")
@@ -163,7 +163,7 @@ async def callback(code: str, db: Session = Depends(get_db)):
         logging.info(f"Created new user: {user.email}")
 
     # Create JWT for user and redirect to frontend with token
-    token = create_access_token({"sub": user.id, "email": user.email, "name": user.name})
+    token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
     redirect_uri = f"{FRONTEND_URL}/callback?token={token}"
     # redirect_uri = f"http://localhost:3000/callback?token={token}"
     logging.info(f"Redirecting to: {redirect_uri}")
