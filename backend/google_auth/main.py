@@ -164,7 +164,8 @@ async def callback(code: str, db: Session = Depends(get_db)):
 
     # Create JWT for user and redirect to frontend with token
     token = create_access_token({"sub": user.id, "email": user.email, "name": user.name})
-    redirect_uri = f"{FRONTEND_URL}/callback?token={token}"
+    # redirect_uri = f"{FRONTEND_URL}/callback?token={token}"
+    redirect_uri = f"http://localhost:3000/callback?token={token}"
     logging.info(f"Redirecting to: {redirect_uri}")
     return RedirectResponse(redirect_uri)
 
