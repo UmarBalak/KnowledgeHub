@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 from starlette import status
 
 from db import get_db, engine, Base
-from models import User
+from models import User, TestUser
 
 # ---------- Setup ----------
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +20,10 @@ app = FastAPI()
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+GOOGLE_EXTERNAL_CLIENT_ID = os.getenv("GOOGLE_EXTERNAL_CLIENT_ID")
+GOOGLE_EXTERNAL_CLIENT_SECRET = os.getenv("GOOGLE_EXTERNAL_CLIENT_SECRET")
+
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
 FRONTEND_URL = os.getenv("FRONTEND_URL")  # e.g. https://your-frontend.com
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -50,21 +54,6 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=2
     expire = datetime.utcnow() + expires_delta
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-def get_current_user_from_cookie(auth_token: str = Cookie(None), db: Session = Depends(get_db)):
-    if not auth_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        user = db.query(User).filter(User.google_id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
 
 # ---------- Health ----------
 @app.get("/")
@@ -108,6 +97,18 @@ def login():
     }
     return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
 
+@app.get("/auth/google/exlogin")
+def login():
+    params = {
+        "client_id": GOOGLE_EXTERNAL_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
+
 @app.get("/auth/google/callback")
 async def callback(code: str, db: Session = Depends(get_db)):
     async with httpx.AsyncClient() as client:
@@ -138,6 +139,61 @@ async def callback(code: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.google_id == info["id"]).first()
     if not user:
         user = User(
+            google_id=info["id"],
+            email=info["email"],
+            name=info.get("name", ""),
+            picture=info.get("picture", ""),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    jwt_token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
+
+    # Redirect to frontend and set cookie on the redirect response
+    redirect_uri = f"{FRONTEND_URL}/home"
+    resp = RedirectResponse(url=redirect_uri, status_code=302)
+    resp.set_cookie(
+        key="auth_token",
+        value=jwt_token,
+        httponly=True,
+        secure=True,          # required for HTTPS
+        samesite="none",      # required for cross-site cookies
+        max_age=86400,
+        path="/",
+    )
+    return resp
+
+@app.get("/auth/google/excallback")
+async def callback(code: str, db: Session = Depends(get_db)):
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            GOOGLE_TOKEN_ENDPOINT,
+            data={
+                "code": code,
+                "client_id": GOOGLE_EXTERNAL_CLIENT_ID,
+                "client_secret": GOOGLE_EXTERNAL_CLIENT_SECRET,
+                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    if token_resp.status_code != 200:
+        raise HTTPException(status_code=400, detail="Failed to get token")
+    access_token = token_resp.json().get("access_token")
+
+    async with httpx.AsyncClient() as client:
+        userinfo_resp = await client.get(
+            GOOGLE_USERINFO_ENDPOINT,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if userinfo_resp.status_code != 200:
+        raise HTTPException(status_code=400, detail="Failed to fetch user info")
+
+    info = userinfo_resp.json()
+    user = db.query(TestUser).filter(TestUser.google_id == info["id"]).first()
+    if not user:
+        user = TestUser(
             google_id=info["id"],
             email=info["email"],
             name=info.get("name", ""),
