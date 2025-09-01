@@ -192,15 +192,24 @@ async def get_home_data(current_user: User = Depends(get_current_user_from_cooki
     return {"message": f"Welcome, {current_user.name}!"}
 
 @app.get("/auth/status")
-async def check_auth_status(auth_token: str = Cookie(None)):
+async def check_auth_status(request: Request, auth_token: str = Cookie(None)):
+    logging.info(f"Auth status check - Cookie present: {auth_token is not None}")
+    logging.info(f"All cookies: {request.cookies}")
+    
     if not auth_token:
+        logging.warning("No auth token found in cookies")
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     try:
         # Validate JWT token
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
+        logging.info(f"Token validated for user: {payload.get('email')}")
         return {"authenticated": True, "user": payload}
-    except jwt.PyJWTError:
+    except jwt.ExpiredSignatureError:
+        logging.warning("Token expired")
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.PyJWTError as e:
+        logging.warning(f"Invalid token: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.post("/auth/logout")
