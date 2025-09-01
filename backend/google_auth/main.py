@@ -36,18 +36,19 @@ SCOPES = ["openid", "email", "profile"]
 
 origins = [
     "http://localhost:3000",
+    "https://localhost:3000",  # Add HTTPS version
     FRONTEND_URL,
 ]
 
-# Add CORS middleware
+# Update CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", 'POST'],
+    allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Set-Cookie"],  # Expose Set-Cookie header
 )
-
 # JWT utility
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1)):
     to_encode = data.copy()
@@ -184,7 +185,7 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         redirect_uri = f"{FRONTEND_URL}/home"
     else:
         redirect_uri = f"http://localhost:3000/home"
-        
+
     logging.info(f"Redirecting to: {redirect_uri}")
     return RedirectResponse(redirect_uri)
 
