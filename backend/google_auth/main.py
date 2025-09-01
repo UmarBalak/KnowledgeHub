@@ -34,21 +34,24 @@ GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v2/userinfo"
 SCOPES = ["openid", "email", "profile"]
 
+is_production = False
+
 origins = [
     "http://localhost:3000",
-    "https://localhost:3000",  # Add HTTPS version
+    "https://localhost:3000",
     FRONTEND_URL,
 ]
 
-# Update CORS middleware
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
-    expose_headers=["Set-Cookie"],  # Expose Set-Cookie header
+    expose_headers=["Set-Cookie"],
 )
+
 # JWT utility
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1)):
     to_encode = data.copy()
@@ -57,31 +60,23 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def get_current_user(request: Request, db: Session = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+def get_current_user_from_cookie(auth_token: str = Cookie(None), db: Session = Depends(get_db)):
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
     try:
-        token = request.headers.get("Authorization")
-        if token and token.startswith("Bearer "):
-            token = token.split(" ")[1]
-        else:
-            raise credentials_exception
-        
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
-            raise credentials_exception
+            raise HTTPException(status_code=401, detail="Invalid token")
         
+        user = db.query(User).filter(User.google_id == user_id).first()
+        if user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        return user
     except jwt.PyJWTError:
-        raise credentials_exception
-    
-    user = db.query(User).filter(User.google_id == user_id).first()
-    if user is None:
-        raise credentials_exception
-    return user
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.get("/")
 async def root():
@@ -89,16 +84,10 @@ async def root():
 
 @app.get("/health", response_class=JSONResponse)
 async def health_check():
-    """
-    Health check endpoint to verify service availability.
-    """
     return {"status": "healthy"}
 
 @app.head("/health")
 async def health_check_monitor():
-    """
-    Health check endpoint to verify service availability.
-    """
     return Response(status_code=200)
 
 @app.get("/auth/google/login")
@@ -122,6 +111,8 @@ def login():
 @app.get("/auth/google/callback")
 async def callback(code: str, response: Response, db: Session = Depends(get_db)):
     logging.info(f"Entered callback with code: {code}")
+    
+    # Get Google tokens
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
             GOOGLE_TOKEN_ENDPOINT,
@@ -134,21 +125,27 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
+    
     if token_response.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to get token")
+    
     tokens = token_response.json()
     access_token = tokens.get("access_token")
     
+    # Get user info from Google
     async with httpx.AsyncClient() as client:
         userinfo_response = await client.get(
-            GOOGLE_USERINFO_ENDPOINT, headers={"Authorization": f"Bearer {access_token}"}
+            GOOGLE_USERINFO_ENDPOINT, 
+            headers={"Authorization": f"Bearer {access_token}"}
         )
+    
     if userinfo_response.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to fetch user info")
     
     user_info = userinfo_response.json()
     logging.info("Fetched user info successfully")
 
+    # Find or create user
     user = db.query(User).filter(User.google_id == user_info["id"]).first()
     logging.info(f"User lookup result: {user}")
 
@@ -165,34 +162,31 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         db.refresh(user)
         logging.info(f"Created new user: {user.email}")
 
-    # Determine if we're in production or development
-    is_production = False # Change to True in production
-
-    # Create JWT for user and redirect to frontend with token
+    # Create JWT token
     token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
 
-    # Set HTTP-only cookie instead of redirecting with token
+    # Set HTTP-only cookie
     response.set_cookie(
         key="auth_token",
         value=token,
         httponly=True,
-        secure=is_production,  # Use True in production with HTTPS
+        secure=is_production,  # False for localhost, True for production
         samesite="lax",
         max_age=7200  # 2 hours
     )
 
+    # Redirect to frontend
     if is_production:
         redirect_uri = f"{FRONTEND_URL}/home"
     else:
-        redirect_uri = f"http://localhost:3000/home"
-
+        redirect_uri = "http://localhost:3000/home"
+        
     logging.info(f"Redirecting to: {redirect_uri}")
     return RedirectResponse(redirect_uri)
 
 @app.get("/auth/google/home")
-async def get_home_data(current_user: User = Depends(get_current_user)):
-    # This endpoint is now protected.
-    # It will only return if the user has a valid JWT token.
+async def get_home_data(current_user: User = Depends(get_current_user_from_cookie)):
+    # Protected endpoint using cookie authentication
     return {"message": f"Welcome, {current_user.name}!"}
 
 @app.get("/auth/status")
@@ -204,7 +198,7 @@ async def check_auth_status(auth_token: str = Cookie(None)):
         # Validate JWT token
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
         return {"authenticated": True, "user": payload}
-    except jwt.PyJWTError:  # Add proper exception handling
+    except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.post("/auth/logout")
