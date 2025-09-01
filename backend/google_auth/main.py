@@ -185,7 +185,10 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
         allowed = False
 
         # Rule 1: Check if email is in TestUser allowlist (for first-time access)
-        test_user = db.query(TestUser).filter(TestUser.email == email).first()
+        test_user = db.query(TestUser).filter(
+            TestUser.email == email,
+            TestUser.is_active == True
+        ).first()
         if test_user:
             allowed = True
 
