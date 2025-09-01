@@ -97,8 +97,8 @@ def login():
     }
     return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
 
-@app.get("/auth/google/exlogin")
-def login():
+@app.get("/auth/google/guestlogin")
+def guestlogin():
     params = {
         "client_id": GOOGLE_EXTERNAL_CLIENT_ID,
         "redirect_uri": GOOGLE_REDIRECT_URI,
@@ -164,8 +164,8 @@ async def callback(code: str, db: Session = Depends(get_db)):
     )
     return resp
 
-@app.get("/auth/google/excallback")
-async def callback(code: str, db: Session = Depends(get_db)):
+@app.get("/auth/google/guestcallback")
+async def guestcallback(code: str, db: Session = Depends(get_db)):
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
             GOOGLE_TOKEN_ENDPOINT,
