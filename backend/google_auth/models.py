@@ -1,5 +1,5 @@
 # models.py
-from sqlalchemy import Column, String, DateTime, Boolean, Text
+from sqlalchemy import Column, String, DateTime, Boolean, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -9,7 +9,7 @@ from db import Base
 class User(Base):
     __tablename__ = 'users'
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # internal UUID
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text('gen_random_uuid()'))  # PostgreSQL native UUID generation
     google_id = Column(String, unique=True, nullable=True)  # store Google account ID
     email = Column(String, unique=True, nullable=False)
     name = Column(String, nullable=False)
@@ -19,7 +19,7 @@ class User(Base):
 class TestUser(Base):
     __tablename__ = 'testusers'
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # internal UUID
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text('gen_random_uuid()'))  # PostgreSQL native UUID generation
     email = Column(String, unique=True, nullable=False, index=True)  # indexed for faster lookups
     name = Column(String, nullable=True)  # optional for test users
     description = Column(Text, nullable=True)  # optional description/notes
