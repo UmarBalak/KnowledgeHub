@@ -44,7 +44,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", 'POST'],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -164,6 +164,9 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         db.refresh(user)
         logging.info(f"Created new user: {user.email}")
 
+    # Determine if we're in production or development
+    is_production = False # Change to True in production
+
     # Create JWT for user and redirect to frontend with token
     token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
 
@@ -172,13 +175,16 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         key="auth_token",
         value=token,
         httponly=True,
-        secure=True,  # Use True in production with HTTPS
+        secure=is_production,  # Use True in production with HTTPS
         samesite="lax",
         max_age=7200  # 2 hours
     )
 
-    # redirect_uri = f"{FRONTEND_URL}/home"
-    redirect_uri = f"http://localhost:3000/home"
+    if is_production:
+        redirect_uri = f"{FRONTEND_URL}/home"
+    else:
+        redirect_uri = f"http://localhost:3000/home"
+        
     logging.info(f"Redirecting to: {redirect_uri}")
     return RedirectResponse(redirect_uri)
 
@@ -197,7 +203,7 @@ async def check_auth_status(auth_token: str = Cookie(None)):
         # Validate JWT token
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
         return {"authenticated": True, "user": payload}
-    except:
+    except jwt.PyJWTError:  # Add proper exception handling
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.post("/auth/logout")
