@@ -4,28 +4,28 @@ from fastapi.responses import RedirectResponse
 import httpx, os, urllib.parse, jwt, logging
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from datetime import datetime, timedelta
 from starlette.responses import JSONResponse
 from starlette import status
 
-from db import get_db, engine, Base
+from db import get_db, engine
 from models import User, TestUser
 
 # ---------- Setup ----------
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
+from db import Base
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 
 GOOGLE_EXTERNAL_CLIENT_ID = os.getenv("GOOGLE_EXTERNAL_CLIENT_ID")
 GOOGLE_EXTERNAL_CLIENT_SECRET = os.getenv("GOOGLE_EXTERNAL_CLIENT_SECRET")
-
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
 GOOGLE_EXTERNAL_REDIRECT_URI = os.getenv("GOOGLE_EXTERNAL_REDIRECT_URI")
+
+CLG_DOMAIN = os.getenv("CLG_DOMAIN")
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")  # e.g. https://your-frontend.com
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -73,7 +73,7 @@ async def health_check_head():
 @app.get("/dbhealth", response_class=JSONResponse)
 async def db_health_check(db: Session = Depends(get_db)):
     try:
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
         raise HTTPException(status_code=503, detail={"status": "unhealthy", "error": str(e)})
@@ -81,24 +81,12 @@ async def db_health_check(db: Session = Depends(get_db)):
 @app.head("/dbhealth")
 async def db_health_check_head(db: Session = Depends(get_db)):
     try:
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         return Response(status_code=200)
     except Exception as e:
         return Response(status_code=503)
 
 # ---------- OAuth ----------
-@app.get("/auth/google/login")
-def login():
-    params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
-        "response_type": "code",
-        "scope": " ".join(SCOPES),
-        "access_type": "offline",
-        "prompt": "consent",
-    }
-    return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
-
 @app.get("/auth/google/guestlogin")
 def guestlogin():
     params = {
@@ -110,61 +98,6 @@ def guestlogin():
         "prompt": "consent",
     }
     return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
-
-@app.get("/auth/google/callback")
-async def callback(code: str, db: Session = Depends(get_db)):
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
-            GOOGLE_TOKEN_ENDPOINT,
-            data={
-                "code": code,
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": GOOGLE_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-    if token_resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to get token")
-    access_token = token_resp.json().get("access_token")
-
-    async with httpx.AsyncClient() as client:
-        userinfo_resp = await client.get(
-            GOOGLE_USERINFO_ENDPOINT,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-    if userinfo_resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to fetch user info")
-
-    info = userinfo_resp.json()
-    user = db.query(User).filter(User.google_id == info["id"]).first()
-    if not user:
-        user = User(
-            google_id=info["id"],
-            email=info["email"],
-            name=info.get("name", ""),
-            picture=info.get("picture", ""),
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    jwt_token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
-
-    # Redirect to frontend and set cookie on the redirect response
-    redirect_uri = f"{FRONTEND_URL}/home"
-    resp = RedirectResponse(url=redirect_uri, status_code=302)
-    resp.set_cookie(
-        key="auth_token",
-        value=jwt_token,
-        httponly=True,
-        secure=True,          # required for HTTPS
-        samesite="none",      # required for cross-site cookies
-        max_age=86400,
-        path="/",
-    )
-    return resp
 
 @app.get("/auth/google/guestcallback")
 async def guestcallback(code: str, db: Session = Depends(get_db)):
@@ -193,11 +126,29 @@ async def guestcallback(code: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Failed to fetch user info")
 
     info = userinfo_resp.json()
+    email = info["email"].lower()
+
+    # ---------- Access Rules ----------
+    allowed = False
+
+    # Rule 1: Check if email is in TestUser allowlist
+    test_user = db.query(TestUser).filter(TestUser.email == email).first()
+    if test_user:
+        allowed = True
+
+    # Rule 2: Check if domain is .sce.edu.in
+    if email.endswith(CLG_DOMAIN):
+        allowed = True
+
+    if not allowed:
+        raise HTTPException(status_code=403, detail="This email is not authorized")
+
+    # ---------- Save or update user ----------
     user = db.query(TestUser).filter(TestUser.google_id == info["id"]).first()
     if not user:
         user = TestUser(
             google_id=info["id"],
-            email=info["email"],
+            email=email,
             name=info.get("name", ""),
             picture=info.get("picture", ""),
         )
@@ -205,9 +156,11 @@ async def guestcallback(code: str, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    jwt_token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
+    jwt_token = create_access_token(
+        {"sub": user.google_id, "email": user.email, "name": user.name}
+    )
 
-    # Redirect to frontend and set cookie on the redirect response
+    # Redirect to frontend and set cookie
     redirect_uri = f"{FRONTEND_URL}/home"
     resp = RedirectResponse(url=redirect_uri, status_code=302)
     resp.set_cookie(
@@ -220,6 +173,7 @@ async def guestcallback(code: str, db: Session = Depends(get_db)):
         path="/",
     )
     return resp
+
 
 # ---------- Auth status (used by frontend) ----------
 @app.get("/auth/status")
