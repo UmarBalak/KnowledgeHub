@@ -100,80 +100,154 @@ def guestlogin():
     return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
 
 @app.get("/auth/google/guestcallback")
-async def guestcallback(code: str, db: Session = Depends(get_db)):
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
-            GOOGLE_TOKEN_ENDPOINT,
-            data={
-                "code": code,
-                "client_id": GOOGLE_EXTERNAL_CLIENT_ID,
-                "client_secret": GOOGLE_EXTERNAL_CLIENT_SECRET,
-                "redirect_uri": GOOGLE_EXTERNAL_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-    if token_resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to get token")
-    access_token = token_resp.json().get("access_token")
+async def guestcallback(code: str = None, error: str = None, db: Session = Depends(get_db)):
+    # Handle OAuth errors from Google
+    if error:
+        error_mapping = {
+            "access_denied": "User denied access to the application",
+            "invalid_request": "Invalid request to Google OAuth",
+            "unauthorized_client": "Unauthorized client",
+            "unsupported_response_type": "Unsupported response type",
+            "invalid_scope": "Invalid scope requested",
+            "server_error": "Google OAuth server error",
+            "temporarily_unavailable": "Google OAuth temporarily unavailable"
+        }
+        error_message = error_mapping.get(error, f"OAuth error: {error}")
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=oauth_error&error_description={urllib.parse.quote(error_message)}"
+        return RedirectResponse(url=redirect_uri, status_code=302)
+    
+    # Handle missing authorization code
+    if not code:
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=missing_code&error_description=No authorization code received from Google"
+        return RedirectResponse(url=redirect_uri, status_code=302)
 
-    async with httpx.AsyncClient() as client:
-        userinfo_resp = await client.get(
-            GOOGLE_USERINFO_ENDPOINT,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-    if userinfo_resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to fetch user info")
+    try:
+        # Exchange code for token
+        async with httpx.AsyncClient() as client:
+            token_resp = await client.post(
+                GOOGLE_TOKEN_ENDPOINT,
+                data={
+                    "code": code,
+                    "client_id": GOOGLE_EXTERNAL_CLIENT_ID,
+                    "client_secret": GOOGLE_EXTERNAL_CLIENT_SECRET,
+                    "redirect_uri": GOOGLE_EXTERNAL_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        
+        if token_resp.status_code != 200:
+            error_detail = "Failed to exchange authorization code for token"
+            try:
+                error_data = token_resp.json()
+                if "error_description" in error_data:
+                    error_detail = error_data["error_description"]
+            except:
+                pass
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=token_exchange_failed&error_description={urllib.parse.quote(error_detail)}"
+            return RedirectResponse(url=redirect_uri, status_code=302)
+        
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        
+        if not access_token:
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=no_access_token&error_description=No access token received from Google"
+            return RedirectResponse(url=redirect_uri, status_code=302)
 
-    info = userinfo_resp.json()
-    email = info["email"].lower()
+        # Fetch user info
+        async with httpx.AsyncClient() as client:
+            userinfo_resp = await client.get(
+                GOOGLE_USERINFO_ENDPOINT,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        
+        if userinfo_resp.status_code != 200:
+            error_detail = "Failed to fetch user information from Google"
+            try:
+                error_data = userinfo_resp.json()
+                if "error_description" in error_data:
+                    error_detail = error_data["error_description"]
+            except:
+                pass
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=userinfo_failed&error_description={urllib.parse.quote(error_detail)}"
+            return RedirectResponse(url=redirect_uri, status_code=302)
 
-    # ---------- Access Rules ----------
-    allowed = False
+        info = userinfo_resp.json()
+        
+        # Validate required fields
+        if not info.get("email"):
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=no_email&error_description=Email address not provided by Google"
+            return RedirectResponse(url=redirect_uri, status_code=302)
+        
+        email = info["email"].lower()
 
-    # Rule 1: Check if email is in TestUser allowlist
-    test_user = db.query(TestUser).filter(TestUser.email == email).first()
-    if test_user:
-        allowed = True
+        # ---------- Access Rules ----------
+        allowed = False
 
-    # Rule 2: Check if domain is CLG_DOMAIN
-    if CLG_DOMAIN and email.endswith(str(CLG_DOMAIN)):
-        allowed = True
+        # Rule 1: Check if email is in TestUser allowlist
+        test_user = db.query(TestUser).filter(TestUser.email == email).first()
+        if test_user:
+            allowed = True
 
-    if not allowed:
-        raise HTTPException(status_code=403, detail="This email is not authorized")
+        # Rule 2: Check if domain is CLG_DOMAIN
+        if CLG_DOMAIN and email.endswith(str(CLG_DOMAIN)):
+            allowed = True
 
-    # ---------- Save or update user ----------
-    user = db.query(TestUser).filter(TestUser.google_id == info["id"]).first()
-    if not user:
-        user = TestUser(
-            google_id=info["id"],
-            email=email,
-            name=info.get("name", ""),
-            picture=info.get("picture", ""),
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        if not allowed:
+            redirect_uri = f"{FRONTEND_URL}/signin?error=unauthorized_email"
+            return RedirectResponse(url=redirect_uri, status_code=302)
 
-    jwt_token = create_access_token(
-        {"sub": user.google_id, "email": user.email, "name": user.name}
-    )
+        # ---------- Save or update user ----------
+        try:
+            user = db.query(TestUser).filter(TestUser.google_id == info["id"]).first()
+            if not user:
+                user = TestUser(
+                    google_id=info["id"],
+                    email=email,
+                    name=info.get("name", ""),
+                    picture=info.get("picture", ""),
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            else:
+                # Update existing user info
+                user.name = info.get("name", user.name)
+                user.picture = info.get("picture", user.picture)
+                db.commit()
+                db.refresh(user)
 
-    # Redirect to frontend and set cookie
-    redirect_uri = f"{FRONTEND_URL}/home"
-    resp = RedirectResponse(url=redirect_uri, status_code=302)
-    resp.set_cookie(
-        key="auth_token",
-        value=jwt_token,
-        httponly=True,
-        secure=True,          # required for HTTPS
-        samesite="none",      # required for cross-site cookies
-        max_age=86400,
-        path="/",
-    )
-    return resp
+            jwt_token = create_access_token(
+                {"sub": user.google_id, "email": user.email, "name": user.name}
+            )
 
+            # Redirect to frontend and set cookie
+            redirect_uri = f"{FRONTEND_URL}/home"
+            resp = RedirectResponse(url=redirect_uri, status_code=302)
+            resp.set_cookie(
+                key="auth_token",
+                value=jwt_token,
+                httponly=True,
+                secure=True,          # required for HTTPS
+                samesite="none",      # required for cross-site cookies
+                max_age=86400,
+                path="/",
+            )
+            return resp
+            
+        except Exception as e:
+            logging.error(f"Database error during user creation/update: {str(e)}")
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=database_error&error_description=Failed to save user information"
+            return RedirectResponse(url=redirect_uri, status_code=302)
+            
+    except httpx.RequestError as e:
+        logging.error(f"Network error during OAuth process: {str(e)}")
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=network_error&error_description=Network error occurred during authentication"
+        return RedirectResponse(url=redirect_uri, status_code=302)
+    except Exception as e:
+        logging.error(f"Unexpected error during OAuth process: {str(e)}")
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=unexpected_error&error_description=An unexpected error occurred"
+        return RedirectResponse(url=redirect_uri, status_code=302)
 
 # ---------- Auth status (used by frontend) ----------
 @app.get("/auth/status")
