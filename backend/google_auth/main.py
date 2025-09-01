@@ -37,8 +37,6 @@ SCOPES = ["openid", "email", "profile"]
 is_production = True
 
 origins = [
-    "http://localhost:3000",
-    "https://localhost:3000",
     FRONTEND_URL,
 ]
 
@@ -181,16 +179,17 @@ async def callback(code: str, db: Session = Depends(get_db)):
     # Create RedirectResponse and set cookie on it
     response = RedirectResponse(url=redirect_uri, status_code=302)
     
-    # Set HTTP-only cookie with proper settings
     response.set_cookie(
         key="auth_token",
         value=token,
         httponly=True,
-        secure=True,  # Set to True for production
-        samesite="lax",  # Can use lax for same-protocol
+        secure=True,          # Required if using HTTPS
+        samesite="none",      # This is CRITICAL for cross-site cookies!
         max_age=86400,
         path="/",
+        domain=".onrender.com"
     )
+
     
     logging.info(f"Cookie set for user: {user.email}")
     return response
