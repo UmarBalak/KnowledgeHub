@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 import httpx, os, urllib.parse
 from dotenv import load_dotenv
-from .db import get_db, engine, Base
-from .models import User
+from db import get_db, engine, Base
+from models import User
 from sqlalchemy.orm import Session
 import jwt
 from datetime import datetime, timedelta
