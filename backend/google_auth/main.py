@@ -172,7 +172,9 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         httponly=True,
         secure=is_production,  # False for localhost, True for production
         samesite="lax",
-        max_age=7200  # 2 hours
+        max_age=7200,  # 2 hours
+        path="/",  # Ensure cookie is available across all paths
+        domain=None  # Let browser set domain automatically
     )
 
     # Redirect to frontend
