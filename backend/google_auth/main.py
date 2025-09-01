@@ -136,8 +136,8 @@ async def guestcallback(code: str, db: Session = Depends(get_db)):
     if test_user:
         allowed = True
 
-    # Rule 2: Check if domain is .sce.edu.in
-    if email.endswith(CLG_DOMAIN):
+    # Rule 2: Check if domain is CLG_DOMAIN
+    if CLG_DOMAIN and email.endswith(str(CLG_DOMAIN)):
         allowed = True
 
     if not allowed:
