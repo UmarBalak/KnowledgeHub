@@ -34,7 +34,7 @@ GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v2/userinfo"
 SCOPES = ["openid", "email", "profile"]
 
-is_production = False
+is_production = True
 
 origins = [
     "http://localhost:3000",
@@ -186,10 +186,10 @@ async def callback(code: str, db: Session = Depends(get_db)):
         key="auth_token",
         value=token,
         httponly=True,
-        secure=is_production,  # False for localhost, True for production
-        samesite="none",  # Allow cross-origin
-        max_age=86400,  # 24 hours
-        path="/",  # Explicit path
+        secure=True,  # Set to True for production
+        samesite="lax",  # Can use lax for same-protocol
+        max_age=86400,
+        path="/",
     )
     
     logging.info(f"Cookie set for user: {user.email}")
