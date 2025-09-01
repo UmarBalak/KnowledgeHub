@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 import httpx, os, urllib.parse
 from dotenv import load_dotenv
-from db import get_db, engine, Base
-from models import User
+from .db import get_db, engine, Base
+from .models import User
 from sqlalchemy.orm import Session
 import jwt
 from datetime import datetime, timedelta
@@ -109,7 +109,7 @@ def login():
     return RedirectResponse(auth_url)
 
 @app.get("/auth/google/callback")
-async def callback(code: str, response: Response, db: Session = Depends(get_db)):
+async def callback(code: str, db: Session = Depends(get_db)):
     logging.info(f"Entered callback with code: {code}")
     
     # Get Google tokens
@@ -127,6 +127,7 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         )
     
     if token_response.status_code != 200:
+        logging.error(f"Token response error: {token_response.status_code} - {token_response.text}")
         raise HTTPException(status_code=400, detail="Failed to get token")
     
     tokens = token_response.json()
@@ -140,6 +141,7 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         )
     
     if userinfo_response.status_code != 200:
+        logging.error(f"Userinfo response error: {userinfo_response.status_code}")
         raise HTTPException(status_code=400, detail="Failed to fetch user info")
     
     user_info = userinfo_response.json()
@@ -162,19 +164,10 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
         db.refresh(user)
         logging.info(f"Created new user: {user.email}")
 
-    # Create JWT token
-    token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
-
-    # Set HTTP-only cookie
-    response.set_cookie(
-        key="auth_token",
-        value=token,
-        httponly=True,
-        secure=is_production,  # False for localhost, True for production
-        samesite="lax",
-        max_age=7200,  # 2 hours
-        path="/",  # Ensure cookie is available across all paths
-        domain=None  # Let browser set domain automatically
+    # Create JWT token with longer expiry
+    token = create_access_token(
+        {"sub": user.google_id, "email": user.email, "name": user.name},
+        expires_delta=timedelta(hours=24)
     )
 
     # Redirect to frontend
@@ -183,8 +176,24 @@ async def callback(code: str, response: Response, db: Session = Depends(get_db))
     else:
         redirect_uri = "http://localhost:3000/home"
         
-    logging.info(f"Redirecting to: {redirect_uri}")
-    return RedirectResponse(redirect_uri)
+    logging.info(f"Setting cookie and redirecting to: {redirect_uri}")
+    
+    # Create RedirectResponse and set cookie on it
+    response = RedirectResponse(url=redirect_uri, status_code=302)
+    
+    # Set HTTP-only cookie with proper settings
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        httponly=True,
+        secure=is_production,  # False for localhost, True for production
+        samesite="none",  # Allow cross-origin
+        max_age=86400,  # 24 hours
+        path="/",  # Explicit path
+    )
+    
+    logging.info(f"Cookie set for user: {user.email}")
+    return response
 
 @app.get("/auth/google/home")
 async def get_home_data(current_user: User = Depends(get_current_user_from_cookie)):
@@ -214,5 +223,5 @@ async def check_auth_status(request: Request, auth_token: str = Cookie(None)):
 
 @app.post("/auth/logout")
 async def logout(response: Response):
-    response.delete_cookie("auth_token")
+    response.delete_cookie("auth_token", path="/")
     return {"message": "Logged out successfully"}
