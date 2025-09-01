@@ -25,6 +25,8 @@ GOOGLE_EXTERNAL_CLIENT_ID = os.getenv("GOOGLE_EXTERNAL_CLIENT_ID")
 GOOGLE_EXTERNAL_CLIENT_SECRET = os.getenv("GOOGLE_EXTERNAL_CLIENT_SECRET")
 
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
+GOOGLE_EXTERNAL_REDIRECT_URI = os.getenv("GOOGLE_EXTERNAL_REDIRECT_URI")
+
 FRONTEND_URL = os.getenv("FRONTEND_URL")  # e.g. https://your-frontend.com
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
@@ -101,7 +103,7 @@ def login():
 def guestlogin():
     params = {
         "client_id": GOOGLE_EXTERNAL_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "redirect_uri": GOOGLE_EXTERNAL_REDIRECT_URI,
         "response_type": "code",
         "scope": " ".join(SCOPES),
         "access_type": "offline",
@@ -173,7 +175,7 @@ async def guestcallback(code: str, db: Session = Depends(get_db)):
                 "code": code,
                 "client_id": GOOGLE_EXTERNAL_CLIENT_ID,
                 "client_secret": GOOGLE_EXTERNAL_CLIENT_SECRET,
-                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "redirect_uri": GOOGLE_EXTERNAL_REDIRECT_URI,
                 "grant_type": "authorization_code",
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
