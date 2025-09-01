@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import logging
 from starlette.responses import JSONResponse, Response
 from starlette import status
+from fastapi import Response, Cookie
+from fastapi.responses import RedirectResponse
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -117,7 +119,7 @@ def login():
     return RedirectResponse(auth_url)
 
 @app.get("/auth/google/callback")
-async def callback(code: str, db: Session = Depends(get_db)):
+async def callback(code: str, response: Response, db: Session = Depends(get_db)):
     logging.info(f"Entered callback with code: {code}")
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
@@ -164,8 +166,19 @@ async def callback(code: str, db: Session = Depends(get_db)):
 
     # Create JWT for user and redirect to frontend with token
     token = create_access_token({"sub": user.google_id, "email": user.email, "name": user.name})
-    # redirect_uri = f"{FRONTEND_URL}/callback?token={token}"
-    redirect_uri = f"http://localhost:3000/callback?token={token}"
+
+    # Set HTTP-only cookie instead of redirecting with token
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        httponly=True,
+        secure=True,  # Use True in production with HTTPS
+        samesite="lax",
+        max_age=7200  # 2 hours
+    )
+
+    # redirect_uri = f"{FRONTEND_URL}/home"
+    redirect_uri = f"http://localhost:3000/home"
     logging.info(f"Redirecting to: {redirect_uri}")
     return RedirectResponse(redirect_uri)
 
@@ -174,3 +187,20 @@ async def get_home_data(current_user: User = Depends(get_current_user)):
     # This endpoint is now protected.
     # It will only return if the user has a valid JWT token.
     return {"message": f"Welcome, {current_user.name}!"}
+
+@app.get("/auth/status")
+async def check_auth_status(auth_token: str = Cookie(None)):
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    try:
+        # Validate JWT token
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
+        return {"authenticated": True, "user": payload}
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+@app.post("/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie("auth_token")
+    return {"message": "Logged out successfully"}
