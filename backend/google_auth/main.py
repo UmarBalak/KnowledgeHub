@@ -75,6 +75,26 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
+@app.head("/health")
+async def health_check_head():
+    return Response(status_code=200)
+
+@app.get("/dbhealth", response_class=JSONResponse)
+async def db_health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute("SELECT 1")
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail={"status": "unhealthy", "error": str(e)})
+
+@app.head("/dbhealth")
+async def db_health_check_head(db: Session = Depends(get_db)):
+    try:
+        db.execute("SELECT 1")
+        return Response(status_code=200)
+    except Exception as e:
+        return Response(status_code=503)
+
 # ---------- OAuth ----------
 @app.get("/auth/google/login")
 def login():
@@ -159,5 +179,11 @@ async def check_auth_status(request: Request, auth_token: str = Cookie(None)):
 # ---------- Logout ----------
 @app.post("/auth/logout")
 async def logout(response: Response):
-    response.delete_cookie("auth_token", path="/")
+    response.delete_cookie(
+        key="auth_token",
+        path="/",
+        secure=True,      # Match the secure flag used when setting the cookie
+        samesite="none"   # Match the SameSite attribute used when setting the cookie
+    )
+    logging.info("User logged out, auth_token cookie deleted")
     return {"message": "Logged out successfully"}

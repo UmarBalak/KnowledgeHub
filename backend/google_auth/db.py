@@ -14,7 +14,13 @@ if not DATABASE_URL:
 
 # Neon DB often requires SSL, which is handled by the `sslmode=require` in the connection string.
 # No extra `connect_args` are usually needed here if `sslmode=require` is in your URL.
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,  # Validates connections before use
+    pool_recycle=300,    # Recreate connections every 5 minutes
+    pool_timeout=20,     # Wait 20 seconds for connection
+    max_overflow=0,      # Don't create extra connections beyond pool_size
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
