@@ -184,7 +184,7 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
         # ---------- Access Rules ----------
         allowed = False
 
-        # Rule 1: Check if email is in TestUser allowlist
+        # Rule 1: Check if email is in TestUser allowlist (for first-time access)
         test_user = db.query(TestUser).filter(TestUser.email == email).first()
         if test_user:
             allowed = True
@@ -197,11 +197,14 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
             redirect_uri = f"{FRONTEND_URL}/signin?error=unauthorized_email"
             return RedirectResponse(url=redirect_uri, status_code=302)
 
-        # ---------- Save or update user ----------
+        # ---------- Save or update user in User table ----------
         try:
-            user = db.query(TestUser).filter(TestUser.google_id == info["id"]).first()
+            # Check if user already exists in User table
+            user = db.query(User).filter(User.google_id == info["id"]).first()
+            
             if not user:
-                user = TestUser(
+                # First time user - create in User table
+                user = User(
                     google_id=info["id"],
                     email=email,
                     name=info.get("name", ""),
@@ -210,8 +213,13 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
                 db.add(user)
                 db.commit()
                 db.refresh(user)
+                
+                # Optionally remove from TestUser table after successful first login
+                # if test_user:
+                #     db.delete(test_user)
+                #     db.commit()
             else:
-                # Update existing user info
+                # Existing user - update info
                 user.name = info.get("name", user.name)
                 user.picture = info.get("picture", user.picture)
                 db.commit()
