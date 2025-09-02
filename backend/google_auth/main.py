@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 from starlette.responses import JSONResponse
 from starlette import status
 
-from db import get_db, engine
+from database import get_db, engine, Base
 from models import User, TestUser
 
 # ---------- Setup ----------
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
-from db import Base
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
