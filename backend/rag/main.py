@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Path, Cookie
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Path, Cookie, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -115,41 +115,26 @@ class CurrentUser(BaseModel):
     role: str
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    auth_token: str = Cookie(None),
-) -> CurrentUser:
-    token = credentials.credentials if credentials else auth_token
-    if not token:
+    request: Request, auth_token: str = Cookie(None)) -> CurrentUser:
+    if not auth_token:
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         email: Optional[str] = payload.get("email")
         name: Optional[str] = payload.get("name")
         role: Optional[str] = payload.get("role")  # Extract role here
-        if user_id is None:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
         return CurrentUser(id=user_id, email=email, name=name, role=role)
     except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Token expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=401, detail="Token expired")
     except jwt.PyJWTError:
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 # Helper to check if user is member of space
