@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse
 from starlette import status
 
 from database import get_db, engine, Base
-from models import User, TestUser
+from models import User, TestUser, RoleEnum
 
 # ---------- Setup ----------
 logging.basicConfig(level=logging.INFO)
@@ -212,6 +212,7 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
                     email=email,
                     name=info.get("name", ""),
                     picture=info.get("picture", ""),
+                    role=RoleEnum.user
                 )
                 db.add(user)
                 db.commit()
@@ -225,11 +226,12 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
                 # Existing user - update info
                 user.name = info.get("name", user.name)
                 user.picture = info.get("picture", user.picture)
+                user.role = info.get("role", user.role.value)
                 db.commit()
                 db.refresh(user)
 
             jwt_token = create_access_token(
-                {"sub": user.google_id, "email": user.email, "name": user.name}
+                {"sub": user.google_id, "email": user.email, "name": user.name, "role": user.role}
             )
 
             # Redirect to frontend and set cookie
@@ -267,7 +269,7 @@ async def check_auth_status(request: Request, auth_token: str = Cookie(None)):
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
-        return {"authenticated": True, "user": {"email": payload.get("email"), "name": payload.get("name")}}
+        return {"authenticated": True, "user": {"email": payload.get("email"), "name": payload.get("name"), "role": payload.get("role")}}
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.PyJWTError:
