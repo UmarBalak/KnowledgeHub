@@ -270,11 +270,20 @@ async def check_auth_status(request: Request, auth_token: str = Cookie(None)):
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
-        return {"authenticated": True, "user": {"email": payload.get("email"), "name": payload.get("name"), "role": payload.get("role")}}
+        return {
+            "authenticated": True,
+            "user": {
+                "id": payload.get("sub"),
+                "email": payload.get("email"),
+                "name": payload.get("name"),
+                "role": payload.get("role"),
+            }
+        }
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
 
 # ---------- Logout ----------
 @app.post("/auth/logout")
