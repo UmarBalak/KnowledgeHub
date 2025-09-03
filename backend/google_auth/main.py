@@ -27,15 +27,7 @@ GOOGLE_EXTERNAL_REDIRECT_URI = os.getenv("GOOGLE_EXTERNAL_REDIRECT_URI")
 
 CLG_DOMAIN = os.getenv("CLG_DOMAIN")
 
-FRONTEND_URL_PROD = os.getenv("FRONTEND_URL")  # e.g. https://your-frontend.com
-FRONTEND_URL_PRE = os.getenv("FRONTEND_URL_PRE")  # e.g. https://your-frontend.com
-FRONTEND_URL = FRONTEND_URL_PROD
-
-ALLOWED_FRONTEND_URLS = [
-    FRONTEND_URL_PROD,
-    FRONTEND_URL_PRE,
-]
-
+FRONTEND_URL = os.getenv("FRONTEND_URL")  # e.g. https://your-frontend.com
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
@@ -52,7 +44,7 @@ is_production = True
 # Must be the exact deployed frontend origin for cookies to flow
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_FRONTEND_URLS,
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
@@ -109,12 +101,7 @@ def guestlogin():
     return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
 
 @app.get("/auth/google/guestcallback")
-async def guestcallback(code: str = None, error: str = None, redirect_base: str = None, db: Session = Depends(get_db)):
-    frontend_url = FRONTEND_URL
-    
-    if redirect_base in ALLOWED_FRONTEND_URLS:
-        frontend_url = redirect_base
-    
+async def guestcallback(code: str = None, error: str = None, db: Session = Depends(get_db)):
     # Handle OAuth errors from Google
     if error:
         error_mapping = {
@@ -127,12 +114,12 @@ async def guestcallback(code: str = None, error: str = None, redirect_base: str 
             "temporarily_unavailable": "Google OAuth temporarily unavailable"
         }
         error_message = error_mapping.get(error, f"OAuth error: {error}")
-        redirect_uri = f"{frontend_url}/auth-error?error=oauth_error&error_description={urllib.parse.quote(error_message)}"
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=oauth_error&error_description={urllib.parse.quote(error_message)}"
         return RedirectResponse(url=redirect_uri, status_code=302)
     
     # Handle missing authorization code
     if not code:
-        redirect_uri = f"{frontend_url}/auth-error?error=missing_code&error_description=No authorization code received from Google"
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=missing_code&error_description=No authorization code received from Google"
         return RedirectResponse(url=redirect_uri, status_code=302)
 
     try:
@@ -158,14 +145,14 @@ async def guestcallback(code: str = None, error: str = None, redirect_base: str 
                     error_detail = error_data["error_description"]
             except:
                 pass
-            redirect_uri = f"{frontend_url}/auth-error?error=token_exchange_failed&error_description={urllib.parse.quote(error_detail)}"
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=token_exchange_failed&error_description={urllib.parse.quote(error_detail)}"
             return RedirectResponse(url=redirect_uri, status_code=302)
         
         token_data = token_resp.json()
         access_token = token_data.get("access_token")
         
         if not access_token:
-            redirect_uri = f"{frontend_url}/auth-error?error=no_access_token&error_description=No access token received from Google"
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=no_access_token&error_description=No access token received from Google"
             return RedirectResponse(url=redirect_uri, status_code=302)
 
         # Fetch user info
@@ -183,14 +170,14 @@ async def guestcallback(code: str = None, error: str = None, redirect_base: str 
                     error_detail = error_data["error_description"]
             except:
                 pass
-            redirect_uri = f"{frontend_url}/auth-error?error=userinfo_failed&error_description={urllib.parse.quote(error_detail)}"
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=userinfo_failed&error_description={urllib.parse.quote(error_detail)}"
             return RedirectResponse(url=redirect_uri, status_code=302)
 
         info = userinfo_resp.json()
         
         # Validate required fields
         if not info.get("email"):
-            redirect_uri = f"{frontend_url}/auth-error?error=no_email&error_description=Email address not provided by Google"
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=no_email&error_description=Email address not provided by Google"
             return RedirectResponse(url=redirect_uri, status_code=302)
         
         email = info["email"].lower()
@@ -211,7 +198,7 @@ async def guestcallback(code: str = None, error: str = None, redirect_base: str 
             allowed = True
 
         if not allowed:
-            redirect_uri = f"{frontend_url}/signin?error=unauthorized_email"
+            redirect_uri = f"{FRONTEND_URL}/signin?error=unauthorized_email"
             return RedirectResponse(url=redirect_uri, status_code=302)
 
         # ---------- Save or update user in User table ----------
@@ -249,7 +236,7 @@ async def guestcallback(code: str = None, error: str = None, redirect_base: str 
             )
 
             # Redirect to frontend and set cookie
-            redirect_uri = f"{frontend_url}/home"
+            redirect_uri = f"{FRONTEND_URL}/home"
             resp = RedirectResponse(url=redirect_uri, status_code=302)
             resp.set_cookie(
                 key="auth_token",
@@ -264,16 +251,16 @@ async def guestcallback(code: str = None, error: str = None, redirect_base: str 
             
         except Exception as e:
             logging.error(f"Database error during user creation/update: {str(e)}")
-            redirect_uri = f"{frontend_url}/auth-error?error=database_error&error_description=Failed to save user information"
+            redirect_uri = f"{FRONTEND_URL}/auth-error?error=database_error&error_description=Failed to save user information"
             return RedirectResponse(url=redirect_uri, status_code=302)
             
     except httpx.RequestError as e:
         logging.error(f"Network error during OAuth process: {str(e)}")
-        redirect_uri = f"{frontend_url}/auth-error?error=network_error&error_description=Network error occurred during authentication"
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=network_error&error_description=Network error occurred during authentication"
         return RedirectResponse(url=redirect_uri, status_code=302)
     except Exception as e:
         logging.error(f"Unexpected error during OAuth process: {str(e)}")
-        redirect_uri = f"{frontend_url}/auth-error?error=unexpected_error&error_description=An unexpected error occurred"
+        redirect_uri = f"{FRONTEND_URL}/auth-error?error=unexpected_error&error_description=An unexpected error occurred"
         return RedirectResponse(url=redirect_uri, status_code=302)
 
 # ---------- Auth status (used by frontend) ----------
