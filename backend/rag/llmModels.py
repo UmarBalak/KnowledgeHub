@@ -10,8 +10,8 @@ load_dotenv()
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 LLM_MODEL = os.getenv("TOGETHER_MODEL_LLM1")
 
-AZURE_ENDPOINT = os.getenv("AZURE_GPT5_MINI_ENDPOINT")
-AZURE_API_KEY = os.getenv("AZURE_GPT5_MINI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_GPT5_MINI_ENDPOINT")
+AZURE_AI_FOUNDRY_API_KEY = os.getenv("AZURE_AI_FOUNDRY_API_KEY")
 AZURE_API_VERSION = os.getenv("OPENAI_API_VERSION")
 
 if not TOGETHER_API_KEY:
@@ -22,8 +22,8 @@ class LLM():
 
     model_name: str = LLM_MODEL
     together_api_key: str = TOGETHER_API_KEY
-    azure_api_key: str = AZURE_API_KEY
-    azure_endpoint: str = AZURE_ENDPOINT
+    AZURE_AI_FOUNDRY_API_KEY: str = AZURE_AI_FOUNDRY_API_KEY
+    AZURE_OPENAI_ENDPOINT: str = AZURE_OPENAI_ENDPOINT
 
     def __init__(self, gpt5: bool = True):
         self.gpt5 = gpt5
@@ -46,9 +46,9 @@ class LLM():
     def __azure_llm(self, prompt: str, stop: Optional[List[str]] = None):
         try:
             llm = AzureChatOpenAI(
-                deployment_name="gpt-5-mini",
-                api_key=self.azure_api_key,
-                azure_endpoint=self.azure_endpoint,
+                deployment_name="gpt-5-nano",
+                api_key=self.AZURE_AI_FOUNDRY_API_KEY,
+                # AZURE_OPENAI_ENDPOINT=self.AZURE_OPENAI_ENDPOINT,
                 )
             response = llm.invoke(prompt, stop=stop)
             return response
