@@ -7,6 +7,7 @@ from starlette.responses import Response
 from starlette.status import HTTP_401_UNAUTHORIZED
 from typing import List, Optional
 import logging
+from dotenv import load_dotenv
 import uuid
 import jwt
 import os
@@ -21,6 +22,7 @@ from blobStorage import upload_blob
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO)
+load_dotenv()
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -29,19 +31,17 @@ app = FastAPI()
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
+FRONTEND_URL = os.getenv("FRONTEND_URL")
 security = HTTPBearer()
 
-origins = [
-    "http://localhost:3000",
-    os.getenv("FRONTEND_URL"),
-]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Set-Cookie"],
 )
 
 security = HTTPBearer()
