@@ -112,7 +112,7 @@ class CurrentUser(BaseModel):
     id: str  # Google ID string from JWT sub claim
     email: str = None
     name: str = None
-    role: Optional[str] = None
+    role: str
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -431,7 +431,7 @@ async def delete_space(
     db.delete(space)
     db.commit()
     return {"detail": "Space deleted"}
-    
+
 @app.get("/system/info")
 async def system_info(
     current_user=Depends(get_current_user),
