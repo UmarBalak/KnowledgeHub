@@ -112,10 +112,11 @@ class CurrentUser(BaseModel):
     id: str  # Google ID string from JWT sub claim
     email: str = None
     name: str = None
+    role: Optional[str] = None
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    auth_token: str = Cookie(None)
+    auth_token: str = Cookie(None),
 ) -> CurrentUser:
     token = credentials.credentials if credentials else auth_token
     if not token:
@@ -127,15 +128,16 @@ async def get_current_user(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
-        email: str = payload.get("email")
-        name: str = payload.get("name")
+        email: Optional[str] = payload.get("email")
+        name: Optional[str] = payload.get("name")
+        role: Optional[str] = payload.get("role")  # Extract role here
         if user_id is None:
             raise HTTPException(
                 status_code=HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return CurrentUser(id=user_id, email=email, name=name)
+        return CurrentUser(id=user_id, email=email, name=name, role=role)
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
@@ -149,6 +151,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+
 # Helper to check if user is member of space
 def is_user_member(db: Session, user_id: str, space_id: int) -> bool:
     membership = db.query(SpaceMembership).filter(
@@ -157,7 +160,9 @@ def is_user_member(db: Session, user_id: str, space_id: int) -> bool:
     ).first()
     return membership is not None
 
-# Endpoint examples
+def require_maintainer(user: CurrentUser):
+    if user.role != "maintainer":
+        raise HTTPException(status_code=403, detail="Insufficient privileges")
 
 
 @app.get("/", response_model=dict)
@@ -184,8 +189,13 @@ async def list_spaces(current_user=Depends(get_current_user), db: Session = Depe
 
 
 @app.post("/spaces", response_model=SpaceOut)
-async def create_space(data: SpaceCreateIn, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    # TODO: optionally check user role for admin permission if needed
+async def create_space(
+    data: SpaceCreateIn,
+    current_user: CurrentUser = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    require_maintainer(current_user)
+
     space = Space(
         name=data.name,
         description=data.description,
@@ -201,7 +211,7 @@ async def create_space(data: SpaceCreateIn, current_user=Depends(get_current_use
         user_id=current_user.id,
         space_id=space.id,
         role=SpaceRoleEnum.admin.value,
-        joined_at=datetime.utcnow()
+        joined_at=datetime.utcnow(),
     )
     db.add(membership)
     db.commit()
@@ -405,7 +415,23 @@ async def query_space_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
+@app.delete("/spaces/{space_id}")
+async def delete_space(
+    space_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_maintainer(current_user)
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    
+    # Optionally check or cascade delete members, documents...
 
+    db.delete(space)
+    db.commit()
+    return {"detail": "Space deleted"}
+    
 @app.get("/system/info")
 async def system_info(
     current_user=Depends(get_current_user),
