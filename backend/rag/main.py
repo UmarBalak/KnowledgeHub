@@ -166,7 +166,7 @@ async def health_check_monitor():
     return Response(status_code=200)
 
 @app.get("/all-spaces", response_model=List[SpaceOut])
-async def list_all_spaces(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+async def list_all_spaces(db: Session = Depends(get_db)):
     spaces = db.query(Space).all()
     return spaces
 
