@@ -48,6 +48,10 @@ security = HTTPBearer()
 rag_pipeline = RAGPipeline(index_name="knowledgehub-main")
 
 # Pydantic response/request models
+class UserContext(BaseModel):
+    google_id: str
+    name: Optional[str] = None
+    role: Optional[str] = None
 
 class UserOut(BaseModel):
     id: str  # UUID string from Auth service
@@ -111,32 +115,14 @@ class DocumentResponse(BaseModel):
     class Config:
         orm_mode = True
 
-class CurrentUser(BaseModel):
-    id: str  # Google ID string from JWT sub claim
-    email: str = None
-    name: str = None
-    role: str
 
-async def get_current_user(
-    request: Request, auth_token: str = Cookie(None)) -> CurrentUser:
-    if not auth_token:
-        logging.error("No auth token")
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
-        logging.info(payload)
-        user_id: str = payload.get("sub")
-        email: Optional[str] = payload.get("email")
-        name: Optional[str] = payload.get("name")
-        role: Optional[str] = payload.get("role")  # Extract role here
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return CurrentUser(id=user_id, email=email, name=name, role=role)
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
+# Dependency to extract user info from headers (set by frontend AuthContext)
+def get_current_user(request: Request) -> UserContext:
+    user_id = request.headers.get("X-User-Id")
+    role = request.headers.get("X-User-Role", "member")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing user id")
+    return UserContext(google_id=user_id, role=role)
 
 # Helper to check if user is member of space
 def is_user_member(db: Session, user_id: str, space_id: int) -> bool:
@@ -146,7 +132,7 @@ def is_user_member(db: Session, user_id: str, space_id: int) -> bool:
     ).first()
     return membership is not None
 
-def require_maintainer(user: CurrentUser):
+def require_maintainer(user: UserContext):
     if user.role != "maintainer":
         raise HTTPException(status_code=403, detail="Insufficient privileges")
 
@@ -172,9 +158,9 @@ async def list_all_spaces(db: Session = Depends(get_db)):
 
 
 @app.get("/spaces", response_model=List[SpaceOut])
-async def list_spaces(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+async def list_spaces(userContext=Depends(get_current_user), db: Session = Depends(get_db)):
     spaces = db.query(Space).join(SpaceMembership, Space.id == SpaceMembership.space_id).filter(
-        SpaceMembership.user_id == current_user.id
+        SpaceMembership.user_id == userContext.google_id
     ).all()
     return spaces
 
@@ -182,10 +168,10 @@ async def list_spaces(current_user=Depends(get_current_user), db: Session = Depe
 @app.post("/spaces", response_model=SpaceOut)
 async def create_space(
     data: SpaceCreateIn,
-    current_user: CurrentUser = Depends(get_current_user), 
+    userContext=Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
-    require_maintainer(current_user)
+    require_maintainer(userContext)
 
     space = Space(
         name=data.name,
@@ -199,7 +185,7 @@ async def create_space(
 
     # Add current user as admin member
     membership = SpaceMembership(
-        user_id=current_user.id,
+        user_id=userContext.google_id,
         space_id=space.id,
         role=SpaceRoleEnum.admin.value,
         joined_at=datetime.utcnow(),
@@ -211,17 +197,17 @@ async def create_space(
 
 
 @app.post("/spaces/{space_id}/join")
-async def join_space(space_id: int = Path(...), current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+async def join_space(space_id: int = Path(...), userContext=Depends(get_current_user), db: Session = Depends(get_db)):
     # Check if already member
     existing = db.query(SpaceMembership).filter(
-        SpaceMembership.user_id == current_user.id,
+        SpaceMembership.user_id == userContext.google_id,
         SpaceMembership.space_id == space_id
     ).first()
     if existing:
         return {"message": "Already a member"}
 
     membership = SpaceMembership(
-        user_id=current_user.id,
+        user_id=userContext.google_id,
         space_id=space_id,
         role=SpaceRoleEnum.member.value,
         joined_at=datetime.utcnow()
@@ -232,9 +218,9 @@ async def join_space(space_id: int = Path(...), current_user=Depends(get_current
 
 
 @app.post("/spaces/{space_id}/leave")
-async def leave_space(space_id: int = Path(...), current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+async def leave_space(space_id: int = Path(...), userContext=Depends(get_current_user), db: Session = Depends(get_db)):
     membership = db.query(SpaceMembership).filter(
-        SpaceMembership.user_id == current_user.id,
+        SpaceMembership.user_id == userContext.google_id,
         SpaceMembership.space_id == space_id
     ).first()
     if not membership:
@@ -245,9 +231,9 @@ async def leave_space(space_id: int = Path(...), current_user=Depends(get_curren
 
 
 @app.get("/spaces/{space_id}/members", response_model=List[str])
-async def list_space_members(space_id: int = Path(...), current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+async def list_space_members(space_id: int = Path(...), userContext=Depends(get_current_user), db: Session = Depends(get_db)):
     # Enforce member info visibility only if current user is member
-    if not is_user_member(db, current_user.id, space_id):
+    if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
     member_ids = db.query(SpaceMembership.user_id).filter(
         SpaceMembership.space_id == space_id
@@ -260,10 +246,10 @@ async def upload_document(
     space_id: int = Path(...),
     file: UploadFile = File(...),
     title: str = Form(...),
-    current_user=Depends(get_current_user),
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not is_user_member(db, current_user.id, space_id):
+    if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
 
     if file.content_type != "text/plain":
@@ -281,7 +267,7 @@ async def upload_document(
         file_url=f"{os.getenv('BLOB_SAS_URL')}/{os.getenv('BLOB_CONTAINER_NAME')}/{unique_filename}",
         file_type="txt",
         file_size=len(file_content),
-        uploader_id=current_user.id,
+        uploader_id=userContext.google_id,
         space_id=space_id,
         uploaded_at=datetime.utcnow(),
         processing_status="pending",
@@ -316,10 +302,10 @@ async def list_documents(
     space_id: int = Path(...),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    current_user=Depends(get_current_user),
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not is_user_member(db, current_user.id, space_id):
+    if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
 
     docs = db.query(Document).filter(
@@ -332,12 +318,12 @@ async def list_documents(
 @app.get("/documents/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: int = Path(...),
-    current_user=Depends(get_current_user),
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     doc = db.query(Document).filter(
         Document.id == document_id,
-        Document.uploader_id == current_user.id
+        Document.uploader_id == userContext.google_id
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -348,12 +334,12 @@ async def get_document(
 @app.delete("/documents/{document_id}")
 async def delete_document(
     document_id: int = Path(...),
-    current_user=Depends(get_current_user),
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     doc = db.query(Document).filter(
         Document.id == document_id,
-        Document.uploader_id == current_user.id
+        Document.uploader_id == userContext.google_id
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -368,10 +354,10 @@ async def delete_document(
 async def query_space_documents(
     space_id: int = Path(...),
     query_request: QueryRequest = Depends(),
-    current_user=Depends(get_current_user),
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not is_user_member(get_db(), current_user.id, space_id):
+    if not is_user_member(get_db(), userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
 
     try:
@@ -384,7 +370,7 @@ async def query_space_documents(
         
         # Record query log in DB
         query_log = QueryLog(
-            user_id=current_user.id,
+            user_id=userContext.google_id,
             query_text=query_request.query,
             response_text=result.get("answer", ""),
             sources=result.get("sources", []),
@@ -409,10 +395,10 @@ async def query_space_documents(
 @app.delete("/spaces/{space_id}")
 async def delete_space(
     space_id: int,
-    current_user: CurrentUser = Depends(get_current_user),
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_maintainer(current_user)
+    require_maintainer(userContext)
     space = db.query(Space).filter(Space.id == space_id).first()
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
@@ -425,10 +411,10 @@ async def delete_space(
 
 @app.get("/system/info")
 async def system_info(
-    current_user=Depends(get_current_user),
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    user_doc_count = db.query(Document).filter(Document.uploader_id == current_user.id).count()
+    user_doc_count = db.query(Document).filter(Document.uploader_id == userContext.google_id).count()
     return {
         "user_documents": user_doc_count,
         "rag_index": rag_pipeline.index_name,
