@@ -27,7 +27,16 @@ GOOGLE_EXTERNAL_REDIRECT_URI = os.getenv("GOOGLE_EXTERNAL_REDIRECT_URI")
 
 CLG_DOMAIN = os.getenv("CLG_DOMAIN")
 
-FRONTEND_URL = os.getenv("FRONTEND_URL")  # e.g. https://your-frontend.com
+FRONTEND_URL_PROD = os.getenv("FRONTEND_URL")  # e.g. https://your-frontend.com
+FRONTEND_URL_PRE = os.getenv("FRONTEND_URL_PRE")  # e.g. https://your-frontend.com
+FRONTEND_URL = FRONTEND_URL_PROD
+
+ALLOWED_FRONTEND_URLS = [
+    FRONTEND_URL_PROD,
+    FRONTEND_URL_PRE,
+]
+
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 
@@ -43,7 +52,7 @@ is_production = True
 # Must be the exact deployed frontend origin for cookies to flow
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=[ALLOWED_FRONTEND_URLS],
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
@@ -100,7 +109,13 @@ def guestlogin():
     return RedirectResponse(GOOGLE_AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params))
 
 @app.get("/auth/google/guestcallback")
-async def guestcallback(code: str = None, error: str = None, db: Session = Depends(get_db)):
+async def guestcallback(code: str = None, error: str = None, redirect_base: str = None, db: Session = Depends(get_db)):
+    if redirect_base not in ALLOWED_FRONTEND_URLS:
+        FRONTEND_URL = ALLOWED_FRONTEND_URLS[0]  # default to prod
+    else:
+        FRONTEND_URL = redirect_base
+
+    
     # Handle OAuth errors from Google
     if error:
         error_mapping = {
