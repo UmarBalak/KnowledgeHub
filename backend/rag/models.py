@@ -9,6 +9,7 @@ from sqlalchemy import (
     Enum,
     Float,
     func,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 import enum
@@ -96,6 +97,7 @@ class QueryLog(Base):
     user_id = Column(String(36), nullable=False)  # UUID from external Auth service
     query_text = Column(Text, nullable=False)
     response_text = Column(Text)
+    sources = Column(JSON, nullable=True)
     tokens_used = Column(Integer)
     response_time = Column(Float)  # seconds
     context_chunks = Column(Integer)
