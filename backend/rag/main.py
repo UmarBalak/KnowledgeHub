@@ -117,11 +117,7 @@ class CurrentUser(BaseModel):
 async def get_current_user(
     request: Request, auth_token: str = Cookie(None)) -> CurrentUser:
     if not auth_token:
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
