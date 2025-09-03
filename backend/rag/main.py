@@ -6,6 +6,7 @@ from sqlalchemy import desc, or_
 from starlette.responses import Response
 from starlette.status import HTTP_401_UNAUTHORIZED
 from typing import List, Optional
+import logging
 import uuid
 import jwt
 import os
@@ -18,6 +19,8 @@ from ragPipeline import RAGPipeline
 from blobStorage import upload_blob
 
 from pydantic import BaseModel, Field
+
+logging.basicConfig(level=logging.INFO)
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -120,6 +123,7 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
+        logging.info(payload)
         user_id: str = payload.get("sub")
         email: Optional[str] = payload.get("email")
         name: Optional[str] = payload.get("name")
