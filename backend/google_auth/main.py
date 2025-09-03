@@ -110,9 +110,7 @@ def guestlogin():
 
 @app.get("/auth/google/guestcallback")
 async def guestcallback(code: str = None, error: str = None, redirect_base: str = None, db: Session = Depends(get_db)):
-    if redirect_base not in ALLOWED_FRONTEND_URLS:
-        FRONTEND_URL = ALLOWED_FRONTEND_URLS[0]  # default to prod
-    else:
+    if redirect_base in ALLOWED_FRONTEND_URLS:
         FRONTEND_URL = redirect_base
 
     
