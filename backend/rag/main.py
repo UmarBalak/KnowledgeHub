@@ -357,7 +357,7 @@ async def query_space_documents(
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not is_user_member(get_db(), userContext.google_id, space_id):
+    if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
 
     try:
