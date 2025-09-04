@@ -67,7 +67,7 @@ class SpaceOut(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SpaceCreateIn(BaseModel):
     name: str = Field(..., max_length=50)
@@ -89,7 +89,7 @@ class DocumentOut(BaseModel):
     display_mode: DisplayModeEnum
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class QueryRequest(BaseModel):
     query: str
@@ -115,7 +115,7 @@ class DocumentResponse(BaseModel):
     file_type: Optional[str]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # Dependency to extract user info from headers (set by frontend AuthContext)
