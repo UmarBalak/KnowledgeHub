@@ -131,6 +131,7 @@ class LLM():
             return self.normalize_ai_message(response)
             
         except Exception as e:
+            logging.error("Error normalizing response")
             print(f"Error in invoke with memory: {str(e)}")
             raise
 
