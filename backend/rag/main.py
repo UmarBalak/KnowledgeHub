@@ -100,7 +100,7 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     query: str
     answer: str
-    sources: List[str] = []
+    sources: List[Dict[str, Any]] 
     context_chunks: int
     tokens_used: Dict[str, Any]
 
