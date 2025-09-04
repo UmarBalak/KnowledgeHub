@@ -363,6 +363,7 @@ class RAGPipeline:
                 query_text, 
                 k=top_k
             )
+            logging.info("Retrieved documents successfully.")
 
             # Format context, sources, and enhanced metadata
             context_texts = []
@@ -403,12 +404,15 @@ class RAGPipeline:
                             end_char,
                             context_chars
                         )
+                        logging.info("Fetched document context.")
+
                         enhanced_source['document_context'] = context_info
                     except Exception as e:
                         logger.warning(f"Could not get context for chunk: {e}")
                         enhanced_source['document_context'] = None
                 
                 enhanced_sources.append(enhanced_source)
+                logging.info("Surces updated")
 
             # Create enhanced prompt with context
             context_text = "\n\n".join(context_texts)
