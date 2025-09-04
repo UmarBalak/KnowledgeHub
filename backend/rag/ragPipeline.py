@@ -270,82 +270,82 @@ class RAGPipeline:
                 os.remove(file_path)
                 logger.debug(f"Cleaned up temporary file: {file_path}")
 
-    def get_document_context(self, document_id: str, start_char: int, end_char: int, 
-                       context_chars: int = 500) -> Dict[str, Any]:
-        """
-        Retrieve exact document section with surrounding context from original document
-        """
-        try:
+    # def get_document_context(self, document_id: str, start_char: int, end_char: int, 
+    #                    context_chars: int = 500) -> Dict[str, Any]:
+    #     """
+    #     Retrieve exact document section with surrounding context from original document
+    #     """
+    #     try:
 
-            logging.info("Searching similarity...")
-            # Find any chunk from this document to get blob URL
-            search_results = self.vector_store.similarity_search(
-                f"document_id:{document_id}", k=1
-            )
+    #         logging.info("Searching similarity...")
+    #         # Find any chunk from this document to get blob URL
+    #         search_results = self.vector_store.similarity_search(
+    #             f"document_id:{document_id}", k=1
+    #         )
             
-            if not search_results:
-                raise ValueError(f"Document {document_id} not found")
+    #         if not search_results:
+    #             raise ValueError(f"Document {document_id} not found")
 
-            logging.info("Fetching blob_url...")
-            blob_url = search_results[0].metadata['blob_url']
-            logging.info("Got the blob_url")
+    #         logging.info("Fetching blob_url...")
+    #         blob_url = search_results[0].metadata['blob_url']
+    #         logging.info("Got the blob_url")
             
-            # Download original document
-            local_path = download_blob_to_local(blob_url)
+    #         # Download original document
+    #         local_path = download_blob_to_local(blob_url)
             
-            try:
-                with open(local_path, 'r', encoding='utf-8') as f:
-                    full_content = f.read()
+    #         try:
+    #             with open(local_path, 'r', encoding='utf-8') as f:
+    #                 full_content = f.read()
                 
-                # Ensure all positions are integers - this is the key fix
-                try:
-                    start_char = int(float(start_char)) if start_char is not None else 0
-                    end_char = int(float(end_char)) if end_char is not None else 0
-                    context_chars = int(float(context_chars)) if context_chars is not None else 500
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid character positions for {document_id}, using defaults")
-                    start_char = 0
-                    end_char = min(len(full_content), 100)  # Default to first 100 chars
-                    context_chars = 500
+    #             # Ensure all positions are integers - this is the key fix
+    #             try:
+    #                 start_char = int(float(start_char)) if start_char is not None else 0
+    #                 end_char = int(float(end_char)) if end_char is not None else 0
+    #                 context_chars = int(float(context_chars)) if context_chars is not None else 500
+    #             except (ValueError, TypeError):
+    #                 logger.warning(f"Invalid character positions for {document_id}, using defaults")
+    #                 start_char = 0
+    #                 end_char = min(len(full_content), 100)  # Default to first 100 chars
+    #                 context_chars = 500
                 
-                # Validate positions
-                start_char = max(0, min(start_char, len(full_content)))
-                end_char = max(start_char, min(end_char, len(full_content)))
+    #             # Validate positions
+    #             start_char = max(0, min(start_char, len(full_content)))
+    #             end_char = max(start_char, min(end_char, len(full_content)))
                 
-                # Calculate context window
-                context_start = max(0, start_char - context_chars)
-                context_end = min(len(full_content), end_char + context_chars)
+    #             # Calculate context window
+    #             context_start = max(0, start_char - context_chars)
+    #             context_end = min(len(full_content), end_char + context_chars)
                 
-                return {
-                    'exact_match': full_content[start_char:end_char],
-                    'context_before': full_content[context_start:start_char],
-                    'context_after': full_content[end_char:context_end],
-                    'full_context': full_content[context_start:context_end],
-                    'original_positions': {
-                        'start_char': start_char,
-                        'end_char': end_char,
-                        'context_start': context_start,
-                        'context_end': context_end
-                    }
-                }
-            finally:
-                # Clean up temp file
-                os.unlink(local_path)
+    #             return {
+    #                 'exact_match': full_content[start_char:end_char],
+    #                 'context_before': full_content[context_start:start_char],
+    #                 'context_after': full_content[end_char:context_end],
+    #                 'full_context': full_content[context_start:context_end],
+    #                 'original_positions': {
+    #                     'start_char': start_char,
+    #                     'end_char': end_char,
+    #                     'context_start': context_start,
+    #                     'context_end': context_end
+    #                 }
+    #             }
+    #         finally:
+    #             # Clean up temp file
+    #             os.unlink(local_path)
                 
-        except Exception as e:
-            logger.error(f"Error getting context for {document_id}: {e}")
-            return {
-                    'exact_match': '',
-                    'context_before': '',
-                    'context_after': '',
-                    'full_context': '',
-                    'original_positions': {
-                        'start_char': 0,
-                        'end_char': 0,
-                        'context_start': 0,
-                        'context_end': 0
-                    }
-                }
+    #     except Exception as e:
+    #         logger.error(f"Error getting context for {document_id}: {e}")
+    #         return {
+    #                 'exact_match': '',
+    #                 'context_before': '',
+    #                 'context_after': '',
+    #                 'full_context': '',
+    #                 'original_positions': {
+    #                     'start_char': 0,
+    #                     'end_char': 0,
+    #                     'context_start': 0,
+    #                     'context_end': 0
+    #                 }
+    #             }
 
     def query(self, 
              query_text: str, 
@@ -509,32 +509,32 @@ class RAGPipeline:
         
         return results
 
-    def enhanced_search(self, query: str, k: int = 3, include_context: bool = False, 
-                       context_chars: int = 500) -> List[Dict[str, Any]]:
-        """
-        Enhanced search that can include document context
-        """
-        results = self.similarity_search_with_context(query, k)
+    # def enhanced_search(self, query: str, k: int = 3, include_context: bool = False, 
+    #                    context_chars: int = 500) -> List[Dict[str, Any]]:
+    #     """
+    #     Enhanced search that can include document context
+    #     """
+    #     results = self.similarity_search_with_context(query, k)
         
-        if include_context:
-            for result in results:
-                try:
-                    # Ensure we get integers from metadata
-                    start_char = int(result['start_char']) if result['start_char'] is not None else 0
-                    end_char = int(result['end_char']) if result['end_char'] is not None else 0
+    #     if include_context:
+    #         for result in results:
+    #             try:
+    #                 # Ensure we get integers from metadata
+    #                 start_char = int(result['start_char']) if result['start_char'] is not None else 0
+    #                 end_char = int(result['end_char']) if result['end_char'] is not None else 0
                     
-                    context_info = self.get_document_context(
-                        result['document_id'],
-                        start_char,
-                        end_char,
-                        context_chars
-                    )
-                    result['document_context'] = context_info
-                except Exception as e:
-                    logger.warning(f"Error getting context for {result['document_id']}: {e}")
-                    result['document_context'] = None
+    #                 context_info = self.get_document_context(
+    #                     result['document_id'],
+    #                     start_char,
+    #                     end_char,
+    #                     context_chars
+    #                 )
+    #                 result['document_context'] = context_info
+    #             except Exception as e:
+    #                 logger.warning(f"Error getting context for {result['document_id']}: {e}")
+    #                 result['document_context'] = None
         
-        return results
+    #     return results
 
     def delete_document(self, document_id: str):
         """Remove all chunks of a document from Pinecone (blob cleanup separate)"""

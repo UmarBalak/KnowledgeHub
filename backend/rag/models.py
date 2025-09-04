@@ -31,12 +31,20 @@ class Space(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(50), unique=True, nullable=False)
     description = Column(Text)
-    is_public = Column(Boolean, default=True)  # Future visibility toggle
+    is_public = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
-    documents = relationship("Document", back_populates="space")
-    memberships = relationship("SpaceMembership", back_populates="space")
+    # Relationships with cascade
+    documents = relationship(
+        "Document",
+        back_populates="space",
+        cascade="all, delete-orphan"
+    )
+    memberships = relationship(
+        "SpaceMembership",
+        back_populates="space",
+        cascade="all, delete-orphan"
+    )
 
 
 class SpaceMembership(Base):  
@@ -45,7 +53,6 @@ class SpaceMembership(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(36), nullable=False)  # UUID from external Auth service
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=False)
-    role = Column(String(50), default="member")  # roles like member, admin
     role = Column(Enum(SpaceRoleEnum), nullable=False, default=SpaceRoleEnum.member.value)
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
 
