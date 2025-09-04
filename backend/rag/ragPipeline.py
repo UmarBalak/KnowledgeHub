@@ -276,6 +276,8 @@ class RAGPipeline:
         Retrieve exact document section with surrounding context from original document
         """
         try:
+
+            logging.info("Searching similarity...")
             # Find any chunk from this document to get blob URL
             search_results = self.vector_store.similarity_search(
                 f"document_id:{document_id}", k=1
@@ -283,8 +285,10 @@ class RAGPipeline:
             
             if not search_results:
                 raise ValueError(f"Document {document_id} not found")
-            
+
+            logging.info("Fetching blob_url...")
             blob_url = search_results[0].metadata['blob_url']
+            logging.info("Got the blob_url")
             
             # Download original document
             local_path = download_blob_to_local(blob_url)
@@ -380,39 +384,41 @@ class RAGPipeline:
                     "similarity_score": float(score)
                 }
                 sources.append(basic_source)
+                logging.info("Sources updated")
                 
-                # Enhanced source with document context if available
-                enhanced_source = basic_source.copy()
-                enhanced_source.update({
-                    'document_id': doc.metadata.get('document_id'),
-                    'chunk_index': doc.metadata.get('chunk_index'),
-                    'start_char': doc.metadata.get('start_char'),
-                    'end_char': doc.metadata.get('end_char'),
-                    'filename': doc.metadata.get('original_filename'),
-                    'chunk_id': doc.metadata.get('chunk_id')
-                })
+                # # Enhanced source with document context if available
+                # enhanced_source = basic_source.copy()
+                # enhanced_source.update({
+                #     'document_id': doc.metadata.get('document_id'),
+                #     'chunk_index': doc.metadata.get('chunk_index'),
+                #     'start_char': doc.metadata.get('start_char'),
+                #     'end_char': doc.metadata.get('end_char'),
+                #     'filename': doc.metadata.get('original_filename'),
+                #     'chunk_id': doc.metadata.get('chunk_id')
+                # })
                 
-                # Add document context if requested and available
-                if include_context and enhanced_source.get('document_id'):
-                    try:
-                        start_char = int(enhanced_source['start_char']) if enhanced_source['start_char'] is not None else 0
-                        end_char = int(enhanced_source['end_char']) if enhanced_source['end_char'] is not None else 0
-                        
-                        context_info = self.get_document_context(
-                            enhanced_source['document_id'],
-                            start_char,
-                            end_char,
-                            context_chars
-                        )
-                        logging.info("Fetched document context.")
+                # # Add document context if requested and available
+                # if include_context and enhanced_source.get('document_id'):
+                #     try:
+                #         start_char = int(enhanced_source['start_char']) if enhanced_source['start_char'] is not None else 0
+                #         end_char = int(enhanced_source['end_char']) if enhanced_source['end_char'] is not None else 0
+ 
+                #         logging.info("Getting document context")
+                #         context_info = self.get_document_context(
+                #             enhanced_source['document_id'],
+                #             start_char,
+                #             end_char,
+                #             context_chars
+                #         )
+                #         logging.info("Fetched document context.")
 
-                        enhanced_source['document_context'] = context_info
-                    except Exception as e:
-                        logger.warning(f"Could not get context for chunk: {e}")
-                        enhanced_source['document_context'] = None
+                #         enhanced_source['document_context'] = context_info
+                #     except Exception as e:
+                #         logger.warning(f"Could not get context for chunk: {e}")
+                #         enhanced_source['document_context'] = None
                 
-                enhanced_sources.append(enhanced_source)
-                logging.info("Surces updated")
+                # enhanced_sources.append(enhanced_source)
+                # logging.info("Enhanced sources updated")
 
             # Create enhanced prompt with context
             context_text = "\n\n".join(context_texts)
@@ -458,7 +464,7 @@ class RAGPipeline:
             return {
                 "answer": answer,
                 "sources": [source["metadata"] for source in sources],  # For backward compatibility
-                "enhanced_sources": enhanced_sources,  # New enhanced sources
+                # "enhanced_sources": enhanced_sources,  # New enhanced sources
                 "tokens_used": tokens_used,
                 "context_chunks": len(retrieved_docs),
                 "query_text": query_text,
