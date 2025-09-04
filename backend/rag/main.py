@@ -381,7 +381,7 @@ async def upload_document(
         document.error_message = str(e)
         db.commit()
 
-    return DocumentResponse.from_orm(document)
+    return DocumentResponse.model_validate(document)
 
 
 @app.get("/spaces/{space_id}/documents", response_model=List[DocumentResponse])
@@ -399,7 +399,7 @@ async def list_documents(
         Document.space_id == space_id
     ).order_by(desc(Document.uploaded_at)).offset(skip).limit(limit).all()
 
-    return [DocumentResponse.from_orm(d) for d in docs]
+    return [DocumentResponse.model_validate(d) for d in docs]
 
 
 @app.get("/documents/{document_id}", response_model=DocumentResponse)
@@ -415,7 +415,7 @@ async def get_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    return DocumentResponse.from_orm(doc)
+    return DocumentResponse.model_validate(doc)
 
 
 @app.delete("/documents/{document_id}")
