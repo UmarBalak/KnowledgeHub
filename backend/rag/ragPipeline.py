@@ -420,7 +420,7 @@ class RAGPipeline:
                 f"Context:\n{context_text}\n\n"
                 f"Question: {query_text}\n"
             )
-
+            logging.info("Prompt created. Invoking LLM...")
 
             # Get LLM response
             response = self.llm.invoke(prompt)
