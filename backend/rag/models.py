@@ -98,7 +98,7 @@ class QueryLog(Base):
     query_text = Column(Text, nullable=False)
     response_text = Column(Text)
     sources = Column(JSON, nullable=True)
-    tokens_used = Column(Integer)
+    tokens_used = Column(JSON)
     response_time = Column(Float)  # seconds
     context_chunks = Column(Integer)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

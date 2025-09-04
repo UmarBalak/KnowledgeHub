@@ -165,6 +165,91 @@ async def list_spaces(userContext=Depends(get_current_user), db: Session = Depen
     ).all()
     return spaces
 
+@app.post("/spaces/{space_id}/query", response_model=QueryResponse)
+async def query_space_documents(
+    query_request: QueryRequest,  # FastAPI parses JSON body here
+    space_id: int = Path(...),
+    userContext=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    logging.info(
+        f"Query request received: user_id={userContext.google_id}, space_id={space_id}, "
+        f"query={query_request.query}, top_k={query_request.top_k}, temperature={query_request.temperature}"
+    )
+
+    if not is_user_member(db, userContext.google_id, space_id):
+        logging.warning(f"Access denied: User {userContext.google_id} not member of space {space_id}")
+        raise HTTPException(status_code=403, detail="Not a space member")
+
+    try:
+        # return {
+        #         "answer": answer,
+        #         "sources": [source["metadata"] for source in sources],  # For backward compatibility
+        #         "enhanced_sources": enhanced_sources,  # New enhanced sources
+        #         "tokens_used": tokens_used,
+        #         "context_chunks": len(retrieved_docs),
+        #         "query_text": query_text,
+        #         "response_metadata": {
+        #             "top_k": top_k,
+        #             "temperature": temperature,
+        #             "include_context": include_context,
+        #             "total_chunks_found": len(retrieved_docs)
+        #         }
+        #     }
+
+        result = rag_pipeline.query(
+            query_text=query_request.query,
+            top_k=query_request.top_k,
+            temperature=query_request.temperature,
+            space_id=space_id
+        )
+        logging.info(f"Query result: answer length={len(result.get('answer', ''))}, tokens_used={result.get('tokens_used', 0)}")
+        # class QueryLog(Base):
+        #     __tablename__ = "query_logs"
+
+        #     id = Column(Integer, primary_key=True, index=True)
+        #     user_id = Column(String(36), nullable=False)  # UUID from external Auth service
+        #     query_text = Column(Text, nullable=False)
+        #     response_text = Column(Text)
+        #     sources = Column(JSON, nullable=True)
+        #     tokens_used = Column(Integer)
+        #     response_time = Column(Float)  # seconds
+        #     context_chunks = Column(Integer)
+        #     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+        # Record query log in DB
+        query_log = QueryLog(
+            user_id=userContext.google_id,
+            query_text=query_request.query,
+            response_text=result.get("answer", ""),
+            sources=json.dumps(result.get("sources", [])),  # serialize to str here
+            tokens_used=result.get("tokens_used", 0),
+            response_time=result.get("response_time", 0.0),
+            context_chunks=result.get("context_chunks"),
+            created_at=datetime.utcnow(),
+        )
+        db.add(query_log)
+        db.commit()
+        logging.info("QueryLog stored in db")
+
+        # class QueryResponse(BaseModel):
+        #     query: str
+        #     answer: str
+        #     sources: List[str] = []
+        #     context_chunks: List[str] = []
+        #     tokens_used: int
+
+        return QueryResponse(
+            query=query_request.query,
+            answer=result.get('answer', ''),
+            sources=result.get("sources", []),
+            context_chunks=result.get("context_chunks"),
+            tokens_used=result.get("tokens_used", 0),
+        )
+    except Exception as e:
+        logging.error(f"Query failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
 
 @app.post("/spaces", response_model=SpaceOut)
 async def create_space(
@@ -350,91 +435,6 @@ async def delete_document(
     db.commit()
     return {"message": "Document deleted successfully"}
 
-
-@app.post("/spaces/{space_id}/query", response_model=QueryResponse)
-async def query_space_documents(
-    query_request: QueryRequest,  # FastAPI parses JSON body here
-    space_id: int = Path(...),
-    userContext=Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    logging.info(
-        f"Query request received: user_id={userContext.google_id}, space_id={space_id}, "
-        f"query={query_request.query}, top_k={query_request.top_k}, temperature={query_request.temperature}"
-    )
-
-    if not is_user_member(db, userContext.google_id, space_id):
-        logging.warning(f"Access denied: User {userContext.google_id} not member of space {space_id}")
-        raise HTTPException(status_code=403, detail="Not a space member")
-
-    try:
-        # return {
-        #         "answer": answer,
-        #         "sources": [source["metadata"] for source in sources],  # For backward compatibility
-        #         "enhanced_sources": enhanced_sources,  # New enhanced sources
-        #         "tokens_used": tokens_used,
-        #         "context_chunks": len(retrieved_docs),
-        #         "query_text": query_text,
-        #         "response_metadata": {
-        #             "top_k": top_k,
-        #             "temperature": temperature,
-        #             "include_context": include_context,
-        #             "total_chunks_found": len(retrieved_docs)
-        #         }
-        #     }
-
-        result = rag_pipeline.query(
-            query_text=query_request.query,
-            top_k=query_request.top_k,
-            temperature=query_request.temperature,
-            space_id=space_id
-        )
-        logging.info(f"Query result: answer length={len(result.get('answer', ''))}, tokens_used={result.get('tokens_used', 0)}")
-        # class QueryLog(Base):
-        #     __tablename__ = "query_logs"
-
-        #     id = Column(Integer, primary_key=True, index=True)
-        #     user_id = Column(String(36), nullable=False)  # UUID from external Auth service
-        #     query_text = Column(Text, nullable=False)
-        #     response_text = Column(Text)
-        #     sources = Column(JSON, nullable=True)
-        #     tokens_used = Column(Integer)
-        #     response_time = Column(Float)  # seconds
-        #     context_chunks = Column(Integer)
-        #     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-        # Record query log in DB
-        query_log = QueryLog(
-            user_id=userContext.google_id,
-            query_text=query_request.query,
-            response_text=result.get("answer", ""),
-            sources=json.dumps(result.get("sources", [])),  # serialize to str here
-            tokens_used=result.get("tokens_used", 0),
-            response_time=result.get("response_time", 0.0),
-            context_chunks=result.get("context_chunks"),
-            created_at=datetime.utcnow(),
-        )
-        db.add(query_log)
-        db.commit()
-        logging.info("QueryLog stored in db")
-
-        # class QueryResponse(BaseModel):
-        #     query: str
-        #     answer: str
-        #     sources: List[str] = []
-        #     context_chunks: List[str] = []
-        #     tokens_used: int
-
-        return QueryResponse(
-            query=query_request.query,
-            answer=result.get('answer', ''),
-            sources=result.get("sources", []),
-            context_chunks=result.get("context_chunks"),
-            tokens_used=result.get("tokens_used", 0),
-        )
-    except Exception as e:
-        logging.error(f"Query failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 
 @app.delete("/spaces/{space_id}")
