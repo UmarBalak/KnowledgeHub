@@ -40,7 +40,7 @@ app.add_middleware(
     allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["*"],
     expose_headers=["Set-Cookie"],
 )
 
