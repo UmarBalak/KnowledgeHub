@@ -352,12 +352,18 @@ async def delete_document(
 
 @app.post("/spaces/{space_id}/query", response_model=QueryResponse)
 async def query_space_documents(
-    query_request: QueryRequest, # FastAPI automatically parses JSON body here
+    query_request: QueryRequest,  # FastAPI parses JSON body here
     space_id: int = Path(...),
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    logging.info(
+        f"Query request received: user_id={userContext.google_id}, space_id={space_id}, "
+        f"query={query_request.query}, top_k={query_request.top_k}, temperature={query_request.temperature}"
+    )
+
     if not is_user_member(db, userContext.google_id, space_id):
+        logging.warning(f"Access denied: User {userContext.google_id} not member of space {space_id}")
         raise HTTPException(status_code=403, detail="Not a space member")
 
     try:
@@ -367,7 +373,8 @@ async def query_space_documents(
             temperature=query_request.temperature,
             space_id=space_id
         )
-        
+        logging.info(f"Query result: answer length={len(result.get('answer', ''))}, tokens_used={result.get('tokens_used', 0)}")
+
         # Record query log in DB
         query_log = QueryLog(
             user_id=userContext.google_id,
@@ -390,7 +397,9 @@ async def query_space_documents(
             tokens_used=result.get("tokens_used", 0),
         )
     except Exception as e:
+        logging.error(f"Query failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
 
 @app.delete("/spaces/{space_id}")
 async def delete_space(
