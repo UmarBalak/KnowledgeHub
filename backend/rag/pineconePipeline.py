@@ -101,7 +101,7 @@ if __name__ == "__main__":
         "cricket is a bat-and-ball game played between two teams of eleven players.",
     ]
 
-    pinecone_rag = PineconePipeline("test1")
+    pinecone_rag = PineconePipeline("knowledgehub-main")
     chunked_docs = pinecone_rag.prepare_documents(texts)
     pinecone_rag.create_vector_store(chunked_docs)
 

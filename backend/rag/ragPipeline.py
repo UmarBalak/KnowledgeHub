@@ -414,9 +414,12 @@ class RAGPipeline:
             context_text = "\n\n".join(context_texts)
             prompt = (
                 f"You are an academic assistant designed for students and researchers. "
-                f"Use the following retrieved context to provide a clear, well-structured, and academically sound answer. "
-                f"Always ground your response in the provided context."
-                f"If the context does not contain enough information to answer, explicitly state that the information is not available and ask user to provide more context and do not talk about what is there in the current context in this case.\n\n"
+                f"You have access to a retrieved context to answer questions. "
+                f"If the retrieved context contains relevant information, use it to provide a clear, well-structured, and academically sound answer. "
+                f"Always ground your response in the provided context if it is relevant. "
+                f"If the context does not contain enough information to answer the question, or if the question is a general query that is outside the scope of the provided documents (e.g., 'who are you?', 'what is machine learning?', 'what is my name?'), use your own comprehensive knowledge to formulate a direct and accurate response. "
+                f"Do not ask the user for more context for general queries. "
+                f"For general queries, your response should be clear, concise, and academically sound.\n\n"
                 f"Context:\n{context_text}\n\n"
                 f"Question: {query_text}\n"
             )
