@@ -7,6 +7,7 @@ from starlette.responses import Response
 from starlette.status import HTTP_401_UNAUTHORIZED
 from typing import List, Optional
 import logging
+import json
 from dotenv import load_dotenv
 import uuid
 import jwt
@@ -407,7 +408,7 @@ async def query_space_documents(
             user_id=userContext.google_id,
             query_text=query_request.query,
             response_text=result.get("answer", ""),
-            sources=result.get("sources", []),
+            sources=json.dumps(result.get("sources", [])),  # serialize to str here
             tokens_used=result.get("tokens_used", 0),
             response_time=result.get("response_time", 0.0),
             context_chunks=result.get("context_chunks"),
@@ -415,6 +416,7 @@ async def query_space_documents(
         )
         db.add(query_log)
         db.commit()
+        logging.info("QueryLog stored in db")
 
         # class QueryResponse(BaseModel):
         #     query: str
