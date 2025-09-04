@@ -352,8 +352,8 @@ async def delete_document(
 
 @app.post("/spaces/{space_id}/query", response_model=QueryResponse)
 async def query_space_documents(
+    query_request: QueryRequest, # FastAPI automatically parses JSON body here
     space_id: int = Path(...),
-    query_request: QueryRequest = Depends(),
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
