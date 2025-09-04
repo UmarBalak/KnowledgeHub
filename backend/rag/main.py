@@ -1,3 +1,4 @@
+from ast import Dict
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Path, Cookie, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from starlette.responses import Response
 from starlette.status import HTTP_401_UNAUTHORIZED
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 import logging
 import json
 from dotenv import load_dotenv
@@ -100,8 +101,8 @@ class QueryResponse(BaseModel):
     query: str
     answer: str
     sources: List[str] = []
-    context_chunks: List[str] = []
-    tokens_used: int
+    context_chunks: int
+    tokens_used: Dict[str, Any]
 
 class DocumentResponse(BaseModel):
     id: int
