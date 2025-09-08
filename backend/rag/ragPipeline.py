@@ -633,9 +633,8 @@ class RAGPipeline:
             logging.info(response)
 
             # Extract the answer and tokens from the AIMessage object
-            answer = response.content
-            tokens_used = response.response_metadata.get("token_usage", {})
-
+            answer = response.get("content", "")
+            tokens_used = response.get("usage_metadata", {})
 
             # Return enhanced response with backward compatibility
             return {
