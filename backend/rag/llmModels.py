@@ -136,6 +136,7 @@ class LLM:
                 {"input": prompt if isinstance(prompt, str) else prompt.content},
                 {"output": response.content}
             )
+            logging.info(response)
             return self.normalize_ai_message(response)
 
         except Exception as e:

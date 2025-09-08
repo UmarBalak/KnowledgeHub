@@ -480,7 +480,7 @@ class RAGPipeline:
             llm = llm_override or self.llm
 
             # Get LLM response
-            chain = LLMChain(llm=llm._llm_instance, prompt=prompt)
+            chain = prompt | llm._llm_instance
             response = chain.invoke({"query_text": query_text, "context_text": context_text})
             answer = response.get("text", "No response generated.")
             tokens_used = response.get("tokens", {})
