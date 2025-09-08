@@ -142,6 +142,40 @@ class LLM:
             logging.error("Error normalizing response")
             print(f"Error in invoke with memory: {str(e)}")
             raise
+
+    def invoke_with_template(self, chat_prompt_template, variables: dict, stop: Optional[list] = None) -> dict:
+        """
+        Invoke LLM with ChatPromptTemplate while preserving memory
+        """
+        try:
+            # Get chat history from memory
+            chat_history = self.memory.chat_memory.messages
+            
+            # Format the prompt template
+            formatted_messages = chat_prompt_template.format_messages(**variables)
+            
+            # Combine with history
+            all_messages = chat_history + formatted_messages
+            
+            # Get response from appropriate LLM
+            if self.gpt5:
+                response = self.__azure_llm(all_messages, stop)
+            else:
+                response = self.__together_llm(all_messages, stop)
+
+            # Save to memory - use the last user message for input
+            user_input = formatted_messages[-1].content if formatted_messages else str(variables)
+            
+            self.memory.save_context(
+                {"input": user_input},
+                {"output": response.content}
+            )
+            
+            return self.normalize_ai_message(response)
+            
+        except Exception as e:
+            logging.error("Error in invoke_with_template")
+            raise
     
     def get_memory_summary(self) -> dict:
         """Get current memory state information"""

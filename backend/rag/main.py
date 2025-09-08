@@ -208,7 +208,7 @@ async def query_space_documents(
 
         # Use per-user LLM instance
         llm = get_user_llm(userContext.google_id)
-        result = rag_pipeline.query(
+        result = rag_pipeline.query_with_template_method(
             query_text=query_request.query,
             top_k=query_request.top_k,
             temperature=query_request.temperature,
