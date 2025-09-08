@@ -193,6 +193,7 @@ class RAGPipeline:
                 page_content=chunk_text,
                 metadata={
                     'document_id': metadata.document_id,
+                    'space_id': metadata.space_id,
                     'chunk_id': metadata.chunk_id,
                     'chunk_index': metadata.chunk_index,
                     'start_char': metadata.start_char,
