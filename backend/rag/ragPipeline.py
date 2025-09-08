@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DocumentMetadata:
     doc_id: str
+    space_id: int
     file_type: str
     blob_url: str
     chunk_count: Optional[int] = None
@@ -206,12 +207,12 @@ class RAGPipeline:
 
         return chunks
 
-    def process_and_index_document(self, blob_url: str, file_type: str, doc_id: str) -> DocumentMetadata:
+    def process_and_index_document(self, blob_url: str, file_type: str, doc_id: str, space_id: int) -> DocumentMetadata:
         """
         Enhanced document processing with detailed chunk tracking and original document storage.
         Maintains compatibility with existing interface.
         """
-        metadata = DocumentMetadata(doc_id=doc_id, file_type=file_type, blob_url=blob_url)
+        metadata = DocumentMetadata(doc_id=doc_id, space_id=space_id, file_type=file_type, blob_url=blob_url)
         file_path = None
 
         try:
@@ -349,9 +350,9 @@ class RAGPipeline:
 
     def query(self, 
              query_text: str, 
+             space_id: int,
              top_k: int = 3,
              temperature: float = 0.1,
-             space_id: Optional[int] = None,
              include_context: bool = True,
              context_chars: int = 500) -> Dict[str, Any]:
         """
@@ -365,7 +366,8 @@ class RAGPipeline:
             # Retrieve relevant documents with scores
             retrieved_docs = self.vector_store.similarity_search_with_score(
                 query_text, 
-                k=top_k
+                k=top_k,
+                filter={"space_id": space_id}
             )
             logging.info("Retrieved documents successfully.")
 

@@ -371,7 +371,8 @@ async def upload_document(
         metadata = rag_pipeline.process_and_index_document(
             blob_url=document.file_url,
             file_type="txt",
-            doc_id=str(document.id)
+            doc_id=str(document.id),
+            space_id=space_id
         )
         document.processing_status = metadata.status
         document.chunk_count = metadata.chunk_count
