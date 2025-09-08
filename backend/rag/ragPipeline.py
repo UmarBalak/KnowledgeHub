@@ -320,10 +320,6 @@ class RAGPipeline:
     #             start_char = max(0, min(start_char, len(full_content)))
     #             end_char = max(start_char, min(end_char, len(full_content)))
                 
-    #             # Calculate context window
-    #             context_start = max(0, start_char - context_chars)
-    #             context_end = min(len(full_content), end_char + context_chars)
-                
     #             return {
     #                 'exact_match': full_content[start_char:end_char],
     #                 'context_before': full_content[context_start:start_char],
@@ -484,9 +480,9 @@ class RAGPipeline:
             llm = llm_override or self.llm
 
             # Get LLM response
-            chain = LLMChain(llm=llm, prompt=prompt)
-            response = chain.run({"query_text": query_text, "context_text": context_text})
-            answer = response.get("content", "No response generated.")
+            chain = LLMChain(llm=llm._llm_instance, prompt=prompt)
+            response = chain.invoke({"query_text": query_text, "context_text": context_text})
+            answer = response.get("text", "No response generated.")
             tokens_used = response.get("tokens", {})
 
             # Return enhanced response with backward compatibility

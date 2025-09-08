@@ -142,7 +142,7 @@ class LLM:
             logging.error("Error normalizing response")
             print(f"Error in invoke with memory: {str(e)}")
             raise
-
+    
     def get_memory_summary(self) -> dict:
         """Get current memory state information"""
         return {
