@@ -79,7 +79,7 @@ class RAGPipeline:
         self.embeddings = PineconeEmbeddings(model=self.embedding_model)
         self.vector_store = None
         self.pcIndex = Pinecone(api_key=self.pinecone_api_key)
-        self.llm = LLM(gpt5=True)
+        self.llm = LLM(gpt5=True, max_messages=10)
         
         # Enhanced text splitter
         self.text_splitter = CharacterTextSplitter(
@@ -358,6 +358,7 @@ class RAGPipeline:
              space_id: int,
              top_k: int = 3,
              temperature: float = 0.1,
+             llm_override=None,
              include_context: bool = True,
              context_chars: int = 500) -> Dict[str, Any]:
         """
@@ -463,8 +464,10 @@ class RAGPipeline:
 
             logging.info("Prompt created. Invoking LLM...")
 
+            llm = llm_override or self.llm
+
             # Get LLM response
-            response = self.llm.invoke(prompt)
+            response = llm.invoke(prompt)
             answer = response.get("content", "No response generated.")
             tokens_used = response.get("tokens", {})
 

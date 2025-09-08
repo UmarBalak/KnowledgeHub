@@ -20,7 +20,7 @@ AZURE_API_VERSION = os.getenv("OPENAI_API_VERSION")
 if not TOGETHER_API_KEY:
     raise ValueError("TOGETHER_API_KEY must be set as an environment variable.")
 
-class LLM():
+class LLM:
     """Custom LangChain wrapper for TogetherAI LLM with ConversationBufferMemory"""
 
     model_name: str = LLM_MODEL
@@ -28,16 +28,28 @@ class LLM():
     AZURE_AI_FOUNDRY_API_KEY: str = AZURE_AI_FOUNDRY_API_KEY
     AZURE_OPENAI_ENDPOINT: str = AZURE_OPENAI_ENDPOINT
 
-    def __init__(self, gpt5: bool = True, return_messages: bool = True):
+    class LimitedBufferMemory(ConversationBufferMemory):
+        def __init__(self, max_messages: int = 5, **kwargs):
+            super().__init__(**kwargs)
+            self.max_messages = max_messages
+
+        def save_context(self, inputs, outputs):
+            super().save_context(inputs, outputs)
+            # Keep only the last max_messages messages in chat history
+            if len(self.chat_memory.messages) > self.max_messages:
+                self.chat_memory.messages = self.chat_memory.messages[-self.max_messages:]
+
+    def __init__(self, gpt5: bool = True, return_messages: bool = True, max_messages: int = 10):
         self.gpt5 = gpt5
-        
+
         # Initialize the LLM instance for memory
         self._llm_instance = self._get_llm_instance()
         
-        # Initialize ConversationBufferMemory
-        self.memory = ConversationBufferMemory(
+        # Initialize LimitedBufferMemory with max_messages
+        self.memory = self.LimitedBufferMemory(
             memory_key="chat_history",
             return_messages=return_messages,
+            max_messages=max_messages
         )
 
     def _get_llm_instance(self):
@@ -53,9 +65,9 @@ class LLM():
                 model=self.model_name,
                 temperature=0.1,
             )
-
+    
     @staticmethod
-    def normalize_ai_message(msg) -> Dict[str, Any]:
+    def normalize_ai_message(msg) -> dict:
         """Convert raw AIMessage into a normalized dict for logging/monitoring"""
         return {
             "id": getattr(msg, 'id', None),
@@ -68,8 +80,8 @@ class LLM():
                 "total": getattr(msg, 'usage_metadata', {}).get("total_tokens")
             }
         }
-    
-    def __azure_llm(self, prompt: str, stop: Optional[List[str]] = None):
+
+    def __azure_llm(self, prompt: str, stop: Optional[list] = None):
         try:
             llm = AzureChatOpenAI(
                 deployment_name="gpt-5-nano",
@@ -82,8 +94,8 @@ class LLM():
         except Exception as e:
             print(f"Error with Azure LLM: {str(e)}")
             raise RuntimeError(f"Azure LLM error: {str(e)}") from e
-        
-    def __together_llm(self, prompt: str, stop: Optional[List[str]] = None):
+
+    def __together_llm(self, prompt: str, stop: Optional[list] = None):
         try:
             llm_model = ChatTogether(
                 together_api_key=self.together_api_key,
@@ -93,56 +105,54 @@ class LLM():
             response = llm_model.invoke(prompt, stop=stop)
             return response
         except RequestException as e:
-            if "429" in str(e):  # Rate limit error
+            if e.response is not None and e.response.status_code == 429:  # Rate limit error
                 print("Rate limit exceeded after all retries")
                 raise RuntimeError("Rate limit exceeded, please try again later") from e
-            
         except Exception as e:
-            print(f"Unexpected error generating LLM response: {str(e)}")
-            raise RuntimeError(f"Unexpected error: {str(e)}") from e
+                print(f"Unexpected error generating LLM response: {str(e)}")
+                raise RuntimeError(f"Unexpected error: {str(e)}") from e
 
-    def invoke(self, prompt: str, stop: Optional[List[str]] = None) -> Dict[str, Any]:
+    def invoke(self, prompt: str, stop: Optional[list] = None) -> dict:
         """
         Generates response from LLM model with memory context.
         """
         try:
             # Get chat history from memory
             chat_history = self.memory.chat_memory.messages
-            
+
             # Create messages list with history + current prompt
             if isinstance(prompt, str):
                 messages = chat_history + [HumanMessage(content=prompt)]
             else:
                 messages = chat_history + [prompt]
-            
+
             # Get response from appropriate LLM
             if self.gpt5:
                 logging.info("Calling gpt5...")
                 response = self.__azure_llm(messages, stop)
             else:
                 response = self.__together_llm(messages, stop)
-            
+
             # Save the interaction to memory
             self.memory.save_context(
                 {"input": prompt if isinstance(prompt, str) else prompt.content},
                 {"output": response.content}
             )
-            
             return self.normalize_ai_message(response)
-            
+
         except Exception as e:
             logging.error("Error normalizing response")
             print(f"Error in invoke with memory: {str(e)}")
             raise
 
-    def get_memory_summary(self) -> Dict[str, Any]:
+    def get_memory_summary(self) -> dict:
         """Get current memory state information"""
         return {
             "message_count": len(self.memory.chat_memory.messages),
             "summary": getattr(self.memory, 'moving_summary_buffer', None),
             "recent_messages": [
                 {"type": type(msg).__name__, "content": msg.content[:100] + "..." if len(msg.content) > 100 else msg.content}
-                for msg in self.memory.chat_memory.messages[-5:]  # Last 5 messages
+                for msg in self.memory.chat_memory.messages[-5:]  # Last 5 messages to display
             ]
         }
 

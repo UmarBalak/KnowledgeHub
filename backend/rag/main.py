@@ -117,6 +117,14 @@ class DocumentResponse(BaseModel):
     class Config:
         from_attributes = True
 
+user_llm_cache = {}
+
+def get_user_llm(user_id):
+    if user_id not in user_llm_cache:
+        from llmModels import LLM
+        user_llm_cache[user_id] = LLM(gpt5=True)
+    return user_llm_cache[user_id]
+
 
 # Dependency to extract user info from headers (set by frontend AuthContext)
 def get_current_user(request: Request) -> UserContext:
@@ -198,11 +206,14 @@ async def query_space_documents(
         #         }
         #     }
 
+        # Use per-user LLM instance
+        llm = get_user_llm(userContext.google_id)
         result = rag_pipeline.query(
             query_text=query_request.query,
             top_k=query_request.top_k,
             temperature=query_request.temperature,
-            space_id=space_id
+            space_id=space_id,
+            llm_override=llm  # <--- pass user LLM!
         )
         logging.info(f"Query result: answer length={len(result.get('answer', ''))}, tokens_used={result.get('tokens_used', 0)}")
         # class QueryLog(Base):
