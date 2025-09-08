@@ -136,7 +136,6 @@ class LLM:
                 {"input": prompt if isinstance(prompt, str) else prompt.content},
                 {"output": response.content}
             )
-            logging.info(response)
             return self.normalize_ai_message(response)
 
         except Exception as e:
@@ -159,23 +158,23 @@ class LLM:
         """Clear the conversation memory"""
         self.memory.clear()
 
-# if __name__ == "__main__":
-#     # Initialize LLM with memory (using GPT-5 by default)
-#     llm_with_memory = LLM(gpt5=True)
+if __name__ == "__main__":
+    # Initialize LLM with memory (using GPT-5 by default)
+    llm_with_memory = LLM(gpt5=True)
     
-#     # Example conversation
-#     try:
-#         # First message
-#         response1 = llm_with_memory.invoke("Hello, my name is John and I love programming.")
-#         print("Response 1:", response1["content"])
+    # Example conversation
+    try:
+        # First message
+        response1 = llm_with_memory.invoke("Hello, my name is John and I love programming.")
+        print("Response 1:", response1["content"])
         
-#         # Second message (memory will include previous context)
-#         response2 = llm_with_memory.invoke("What's my name and what do I love?")
-#         print("Response 2:", response2["content"])
+        # Second message (memory will include previous context)
+        response2 = llm_with_memory.invoke("What's my name and what do I love?")
+        print("Response 2:", response2["content"])
         
-#         # Check memory state
-#         memory_info = llm_with_memory.get_memory_summary()
-#         print("Memory Info:", memory_info)
+        # Check memory state
+        memory_info = llm_with_memory.get_memory_summary()
+        print("Memory Info:", memory_info)
         
-#     except Exception as e:
-#         print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error: {e}")
