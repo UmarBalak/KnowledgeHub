@@ -369,7 +369,8 @@ class RAGPipeline:
                 k=top_k,
                 filter={"space_id": space_id}
             )
-            logging.info("Retrieved documents successfully.")
+            logging.info(f"Retrieved documents successfully with space_id {space_id}")
+            logging.info(retrieved_docs)
 
             # Format context, sources, and enhanced metadata
             context_texts = []
