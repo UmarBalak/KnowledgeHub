@@ -259,7 +259,7 @@ class RAGPipeline:
             metadata.status = "completed"
             logger.info(f"Successfully processed document {doc_id} with enhancements")
 
-            return metadata
+            return metadata, chunked_docs
 
         except Exception as e:
             metadata.status = "failed"
