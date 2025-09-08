@@ -3,6 +3,8 @@ import json
 import hashlib
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, asdict
+
+from numpy import spacing
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.schema import Document
@@ -38,6 +40,7 @@ class DocumentMetadata:
 class ChunkMetadata:
     """Enhanced metadata for each text chunk with precise tracking"""
     document_id: str
+    space_id: int
     chunk_id: str
     chunk_index: int
     start_char: int
@@ -152,7 +155,7 @@ class RAGPipeline:
         else:
             raise ValueError(f"Unsupported file type: {file_type}")
 
-    def _create_enhanced_chunks_with_metadata(self, content: str, filename: str, document_id: str, 
+    def _create_enhanced_chunks_with_metadata(self, content: str, filename: str, document_id: str, space_id: int,  
                                             blob_url: str, file_type: str = "text") -> List[Document]:
         """Create text chunks with detailed metadata for precise tracking"""
         
@@ -172,6 +175,7 @@ class RAGPipeline:
             
             metadata = ChunkMetadata(
                 document_id=document_id,
+                space_id=space_id,
                 chunk_id=chunk_id,
                 chunk_index=i,
                 start_char=start_pos,
@@ -238,7 +242,7 @@ class RAGPipeline:
             
             # Create enhanced chunks with detailed metadata
             chunked_docs = self._create_enhanced_chunks_with_metadata(
-                content, filename, enhanced_doc_id, original_blob_url, file_type
+                content, filename, enhanced_doc_id, space_id, original_blob_url, file_type
             )
             
             metadata.chunk_count = len(chunked_docs)
