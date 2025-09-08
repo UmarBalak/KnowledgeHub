@@ -7,6 +7,7 @@ from langchain_openai import AzureChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import BaseMessage, HumanMessage, AIMessage
 from requests.exceptions import RequestException
+from pydantic import Field
 
 load_dotenv()
 
@@ -27,17 +28,14 @@ class LLM:
     together_api_key: str = TOGETHER_API_KEY
     AZURE_AI_FOUNDRY_API_KEY: str = AZURE_AI_FOUNDRY_API_KEY
     AZURE_OPENAI_ENDPOINT: str = AZURE_OPENAI_ENDPOINT
-
     class LimitedBufferMemory(ConversationBufferMemory):
-        def __init__(self, max_messages: int = 5, **kwargs):
-            super().__init__(**kwargs)
-            self.max_messages = max_messages
+        max_messages: int = Field(default=5)
 
         def save_context(self, inputs, outputs):
             super().save_context(inputs, outputs)
-            # Keep only the last max_messages messages in chat history
             if len(self.chat_memory.messages) > self.max_messages:
                 self.chat_memory.messages = self.chat_memory.messages[-self.max_messages:]
+
 
     def __init__(self, gpt5: bool = True, return_messages: bool = True, max_messages: int = 10):
         self.gpt5 = gpt5
