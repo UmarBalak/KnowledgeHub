@@ -54,7 +54,7 @@ class LLM:
         """Get the appropriate LLM instance for memory operations"""
         if self.gpt5:
             return AzureChatOpenAI(
-                deployment_name="gpt-5-nano",
+                deployment_name="gpt-5-mini",
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
         else:
@@ -82,7 +82,7 @@ class LLM:
     def __azure_llm(self, prompt: str, stop: Optional[list] = None):
         try:
             llm = AzureChatOpenAI(
-                deployment_name="gpt-5-nano",
+                deployment_name="gpt-5-mini",
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
             logging.info("Gpt5 LLM initialized.")
