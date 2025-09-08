@@ -368,7 +368,7 @@ async def upload_document(
     db.refresh(document)
 
     try:
-        metadata, chunked_docs = rag_pipeline.process_and_index_document(
+        metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
             blob_url=document.file_url,
             file_type="txt",
             doc_id=str(document.id),
@@ -378,18 +378,18 @@ async def upload_document(
         document.chunk_count = metadata.chunk_count
 
         # Save each chunk's metadata to the database
+        doc_chunks = []
         for chunk in chunked_docs:
-            chunk_metadata = chunk.metadata
+            meta = chunk.metadata
             doc_chunk = DocumentChunk(
                 document_id=document.id,
-                chunk_id=chunk_metadata['chunk_id'],
-                chunk_index=chunk_metadata['chunk_index'],
-                content=chunk.page_content,
-                start_char=chunk_metadata['start_char'],
-                end_char=chunk_metadata['end_char']
+                chunk_order=meta['chunk_index'],
+                vector_id=meta.get('chunk_id'),  # Or however vector_id is handled
+                embedding_model=embedding_model,
+                created_at=meta.get('created_at')
             )
-            db.add(doc_chunk)
-
+            doc_chunks.append(doc_chunk)
+        db.add_all(doc_chunks)
         db.commit()
     except Exception as e:
         document.processing_status = "failed"

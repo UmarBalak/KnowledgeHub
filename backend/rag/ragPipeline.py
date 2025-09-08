@@ -259,7 +259,7 @@ class RAGPipeline:
             metadata.status = "completed"
             logger.info(f"Successfully processed document {doc_id} with enhancements")
 
-            return metadata, chunked_docs
+            return metadata, chunked_docs, self.embedding_model
 
         except Exception as e:
             metadata.status = "failed"
