@@ -482,8 +482,12 @@ class RAGPipeline:
             # Get LLM response
             chain = prompt | llm._llm_instance
             response = chain.invoke({"query_text": query_text, "context_text": context_text})
-            answer = response.get("text", "No response generated.")
-            tokens_used = response.get("tokens", {})
+            logging.info(response)
+
+            # Extract the answer and tokens from the AIMessage object
+            answer = response.content
+            tokens_used = response.response_metadata.get("token_usage", {})
+
 
             # Return enhanced response with backward compatibility
             return {
