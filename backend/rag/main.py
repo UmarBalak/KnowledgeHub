@@ -50,6 +50,11 @@ security = HTTPBearer()
 rag_pipeline = RAGPipeline(index_name="knowledgehub-main")
 
 # Pydantic response/request models
+
+class SpaceStats(BaseModel):
+    total_docs: int
+    user_docs: int
+    
 class UserContext(BaseModel):
     google_id: str
     name: Optional[str] = None
@@ -464,7 +469,25 @@ async def delete_document(
     db.commit()
     return {"message": "Document deleted successfully"}
 
+@app.get("/spaces/{space_id}/stats", response_model=SpaceStats)
+async def get_space_stats(
+    space_id: int = Path(...),
+    userContext=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Check if user is a member
+    if not is_user_member(db, userContext.google_id, space_id):
+        raise HTTPException(status_code=403, detail="Not a space member")
 
+    # Efficient SQL count queries
+    total = db.query(Document).filter(Document.space_id == space_id).count()
+    
+    user_count = db.query(Document).filter(
+        Document.space_id == space_id, 
+        Document.uploader_id == userContext.google_id
+    ).count()
+
+    return SpaceStats(total_docs=total, user_docs=user_count)
 
 @app.delete("/spaces/{space_id}")
 async def delete_space(
