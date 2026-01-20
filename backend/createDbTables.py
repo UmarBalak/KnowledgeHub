@@ -4,9 +4,9 @@ from dotenv import load_dotenv
 # Load environment variables (including DATABASE_URL)
 load_dotenv()
 
-from database import Base, engine
+from backend.rag.database import Base, engine
 # Import all your models so SQLAlchemy knows about them
-from models import User, Document, DocumentChunk, ReportedContent
+from backend.rag.models import User, Document, DocumentChunk, ReportedContent
 
 def create_tables():
     print("Attempting to create database tables on Neon DB...")
