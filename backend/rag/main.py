@@ -23,7 +23,6 @@ from blobStorage import upload_blob
 
 from pydantic import BaseModel, Field
 
-from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
