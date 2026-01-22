@@ -23,6 +23,8 @@ from blobStorage import upload_blob
 
 from pydantic import BaseModel, Field
 
+from pathlib import Path
+
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
@@ -354,21 +356,37 @@ async def upload_document(
 ):
     if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
-
-    if file.content_type != "text/plain":
-        raise HTTPException(status_code=400, detail="Only text/plain files are supported for now")
-
+    
+    # Dynamically determine file type
+    allowed_types = {
+        "text/plain": ("txt", ".txt"),
+        "application/pdf": ("pdf", ".pdf")
+    }
+    
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported file type. Supported: {', '.join(allowed_types.keys())}"
+        )
+    
+    file_type, extension = allowed_types[file.content_type]
+    
+    # Read file content
     file_content = await file.read()
-    unique_filename = f"{uuid.uuid4()}.txt"
-
+    
+    # Generate unique filename with correct extension
+    unique_filename = f"{uuid.uuid4()}{extension}"
+    
+    # Upload to blob storage
     upload_success = upload_blob(file_content, unique_filename)
     if not upload_success:
         raise HTTPException(status_code=500, detail="Failed to upload file to storage")
-
+    
+    # Create document record
     document = Document(
         title=title,
         file_url=f"{os.getenv('BLOB_SAS_URL')}/{os.getenv('BLOB_CONTAINER_NAME')}/{unique_filename}",
-        file_type="txt",
+        file_type=file_type,  # Now dynamic
         file_size=len(file_content),
         uploader_id=userContext.google_id,
         space_id=space_id,
@@ -379,42 +397,47 @@ async def upload_document(
         source_name="User Upload",
         display_mode=DisplayModeEnum.generated_answer
     )
+    
     db.add(document)
     db.commit()
     db.refresh(document)
-
+    
     try:
+        # Pass dynamic file_type to pipeline
         metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
             blob_url=document.file_url,
-            file_type="txt",
+            file_type=file_type,
             doc_id=str(document.id),
             space_id=space_id
         )
+        
         document.processing_status = metadata.status
         document.chunk_count = metadata.chunk_count
-
-        # Save each chunk's metadata to the database
+        
+        # Save chunks to database
         doc_chunks = []
         for chunk in chunked_docs:
             meta = chunk.metadata
             doc_chunk = DocumentChunk(
                 document_id=document.id,
                 chunk_order=meta['chunk_index'],
-                vector_id=meta.get('chunk_id'),  # Or however vector_id is handled
+                vector_id=meta.get('chunk_id'),
                 embedding_model=embedding_model,
                 created_at=meta.get('created_at')
             )
             doc_chunks.append(doc_chunk)
+        
         db.add_all(doc_chunks)
         db.commit()
+        
     except Exception as e:
         document.processing_status = "failed"
         document.error_message = str(e)
         db.commit()
-        # Raise an exception here to ensure a proper error response is sent to the client
         raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
-
+    
     return DocumentResponse.model_validate(document)
+
 
 
 @app.get("/spaces/{space_id}/documents", response_model=List[DocumentResponse])
