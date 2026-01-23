@@ -2,6 +2,7 @@ from ast import Dict
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Path, Cookie, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from starlette.responses import Response
@@ -16,7 +17,7 @@ import os
 from datetime import datetime
 from starlette.responses import JSONResponse, Response
 
-from database import get_db, Base, engine
+from database import get_db, Base, engine, SessionLocal
 from models import Space, SpaceMembership, Document, DocumentChunk, QueryLog, SpaceRoleEnum, DisplayModeEnum
 from ragPipeline import RAGPipeline
 from blobStorage import upload_blob
@@ -151,6 +152,56 @@ def is_user_member(db: Session, user_id: str, space_id: int) -> bool:
 def require_maintainer(user: UserContext):
     if user.role != "maintainer":
         raise HTTPException(status_code=403, detail="Insufficient privileges")
+
+def process_document_background(doc_id: int, space_id: int, file_type: str):
+    """
+    This runs AFTER the browser gets a response.
+    It performs the heavy lifting: chunking, embedding, and indexing.
+    """
+    db = SessionLocal() # Create a new independent DB session
+    try:
+        # Re-fetch the document within this new session
+        document = db.query(Document).filter(Document.id == doc_id).first()
+        if not document:
+            return
+
+        # --- HEAVY RAG PIPELINE START ---
+        metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
+            blob_url=document.file_url,
+            file_type=file_type,
+            doc_id=str(document.id),
+            space_id=space_id
+        )
+        
+        # Update Document Status
+        document.processing_status = metadata.status
+        document.chunk_count = metadata.chunk_count
+        
+        # Save Chunks
+        doc_chunks = []
+        for chunk in chunked_docs:
+            meta = chunk.metadata
+            doc_chunk = DocumentChunk(
+                document_id=document.id,
+                chunk_order=meta['chunk_index'],
+                vector_id=meta.get('chunk_id'),
+                embedding_model=embedding_model,
+                created_at=meta.get('created_at')
+            )
+            doc_chunks.append(doc_chunk)
+        
+        db.add_all(doc_chunks)
+        db.commit()
+        # --- HEAVY RAG PIPELINE END ---
+
+    except Exception as e:
+        print(f"Background processing failed: {e}")
+        # Update DB so the UI knows it failed later
+        document.processing_status = "failed"
+        document.error_message = str(e)
+        db.commit()
+    finally:
+        db.close() # Important: Close the background session
 
 
 @app.get("/", response_model=dict)
@@ -345,54 +396,135 @@ async def list_space_members(space_id: int = Path(...), userContext=Depends(get_
     return [m[0] for m in member_ids]
 
 
+# @app.post("/spaces/{space_id}/documents/upload", response_model=DocumentResponse)
+# async def upload_document(
+#     space_id: int = Path(...),
+#     file: UploadFile = File(...),
+#     title: str = Form(...),
+#     userContext=Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     if not is_user_member(db, userContext.google_id, space_id):
+#         raise HTTPException(status_code=403, detail="Not a space member")
+    
+#     # Dynamically determine file type
+#     allowed_types = {
+#         "text/plain": ("txt", ".txt"),
+#         "application/pdf": ("pdf", ".pdf")
+#     }
+    
+#     if file.content_type not in allowed_types:
+#         raise HTTPException(
+#             status_code=400, 
+#             detail=f"Unsupported file type. Supported: {', '.join(allowed_types.keys())}"
+#         )
+    
+#     file_type, extension = allowed_types[file.content_type]
+    
+#     # Read file content
+#     file_content = await file.read()
+    
+#     # Generate unique filename with correct extension
+#     unique_filename = f"{uuid.uuid4()}{extension}"
+    
+#     # Upload to blob storage
+#     upload_success = upload_blob(file_content, unique_filename)
+#     if not upload_success:
+#         raise HTTPException(status_code=500, detail="Failed to upload file to storage")
+    
+#     # Create document record
+#     document = Document(
+#         title=title,
+#         file_url=f"{os.getenv('BLOB_SAS_URL')}/{os.getenv('BLOB_CONTAINER_NAME')}/{unique_filename}",
+#         file_type=file_type,  # Now dynamic
+#         file_size=len(file_content),
+#         uploader_id=userContext.google_id,
+#         space_id=space_id,
+#         uploaded_at=datetime.utcnow(),
+#         processing_status="pending",
+#         chunk_count=0,
+#         error_message=None,
+#         source_name="User Upload",
+#         display_mode=DisplayModeEnum.generated_answer
+#     )
+    
+#     db.add(document)
+#     db.commit()
+#     db.refresh(document)
+    
+#     try:
+#         # Pass dynamic file_type to pipeline
+#         metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
+#             blob_url=document.file_url,
+#             file_type=file_type,
+#             doc_id=str(document.id),
+#             space_id=space_id
+#         )
+        
+#         document.processing_status = metadata.status
+#         document.chunk_count = metadata.chunk_count
+        
+#         # Save chunks to database
+#         doc_chunks = []
+#         for chunk in chunked_docs:
+#             meta = chunk.metadata
+#             doc_chunk = DocumentChunk(
+#                 document_id=document.id,
+#                 chunk_order=meta['chunk_index'],
+#                 vector_id=meta.get('chunk_id'),
+#                 embedding_model=embedding_model,
+#                 created_at=meta.get('created_at')
+#             )
+#             doc_chunks.append(doc_chunk)
+        
+#         db.add_all(doc_chunks)
+#         db.commit()
+        
+#     except Exception as e:
+#         document.processing_status = "failed"
+#         document.error_message = str(e)
+#         db.commit()
+#         raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
+    
+#     return DocumentResponse.model_validate(document)
+
 @app.post("/spaces/{space_id}/documents/upload", response_model=DocumentResponse)
 async def upload_document(
     space_id: int = Path(...),
     file: UploadFile = File(...),
     title: str = Form(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(), # <--- Add this
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # 1. Validation Logic (Same as before)
     if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
     
-    # Dynamically determine file type
-    allowed_types = {
-        "text/plain": ("txt", ".txt"),
-        "application/pdf": ("pdf", ".pdf")
-    }
-    
+    allowed_types = {"text/plain": ("txt", ".txt"), "application/pdf": ("pdf", ".pdf")}
     if file.content_type not in allowed_types:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Unsupported file type. Supported: {', '.join(allowed_types.keys())}"
-        )
+        raise HTTPException(status_code=400, detail="Unsupported file type")
     
     file_type, extension = allowed_types[file.content_type]
-    
-    # Read file content
     file_content = await file.read()
-    
-    # Generate unique filename with correct extension
     unique_filename = f"{uuid.uuid4()}{extension}"
     
-    # Upload to blob storage
+    # 2. Upload to Blob (Quick)
     upload_success = upload_blob(file_content, unique_filename)
     if not upload_success:
-        raise HTTPException(status_code=500, detail="Failed to upload file to storage")
+        raise HTTPException(status_code=500, detail="Failed to upload file")
     
-    # Create document record
+    # 3. Create DB Record with "pending" status (Quick)
     document = Document(
         title=title,
         file_url=f"{os.getenv('BLOB_SAS_URL')}/{os.getenv('BLOB_CONTAINER_NAME')}/{unique_filename}",
-        file_type=file_type,  # Now dynamic
+        file_type=file_type,
         file_size=len(file_content),
         uploader_id=userContext.google_id,
         space_id=space_id,
         uploaded_at=datetime.utcnow(),
-        processing_status="pending",
+        processing_status="pending", # <--- Important: Initial status
         chunk_count=0,
-        error_message=None,
         source_name="User Upload",
         display_mode=DisplayModeEnum.generated_answer
     )
@@ -401,42 +533,18 @@ async def upload_document(
     db.commit()
     db.refresh(document)
     
-    try:
-        # Pass dynamic file_type to pipeline
-        metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
-            blob_url=document.file_url,
-            file_type=file_type,
-            doc_id=str(document.id),
-            space_id=space_id
-        )
-        
-        document.processing_status = metadata.status
-        document.chunk_count = metadata.chunk_count
-        
-        # Save chunks to database
-        doc_chunks = []
-        for chunk in chunked_docs:
-            meta = chunk.metadata
-            doc_chunk = DocumentChunk(
-                document_id=document.id,
-                chunk_order=meta['chunk_index'],
-                vector_id=meta.get('chunk_id'),
-                embedding_model=embedding_model,
-                created_at=meta.get('created_at')
-            )
-            doc_chunks.append(doc_chunk)
-        
-        db.add_all(doc_chunks)
-        db.commit()
-        
-    except Exception as e:
-        document.processing_status = "failed"
-        document.error_message = str(e)
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
+    # 4. Schedule the Heavy Task (Fire and Forget)
+    background_tasks.add_task(
+        process_document_background, 
+        doc_id=document.id, 
+        space_id=space_id, 
+        file_type=file_type
+    )
     
+    # 5. Return immediately!
+    # The browser receives this response in ~1-2 seconds.
+    # The background task continues running on the server.
     return DocumentResponse.model_validate(document)
-
 
 
 @app.get("/spaces/{space_id}/documents", response_model=List[DocumentResponse])
