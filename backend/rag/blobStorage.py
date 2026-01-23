@@ -30,6 +30,24 @@ def upload_blob(file_data: bytes, filename: str) -> bool:
         print(f"Failed to upload blob: {e}")
         return False
 
+def delete_blob(filename: str) -> bool:
+    """
+    Deletes a blob from the container.
+    """
+    try:
+        container_client = blob_service_client.get_container_client(CONTAINER_NAME)
+        blob_client = container_client.get_blob_client(filename)
+        if blob_client.exists():
+            blob_client.delete_blob()
+            print(f"Blob '{filename}' deleted successfully.")
+            return True
+        else:
+            print(f"Blob '{filename}' not found.")
+            return False
+    except Exception as e:
+        print(f"Failed to delete blob: {e}")
+        return False
+
 
 def download_blob_to_local(blob_url: str) -> str:
     """
