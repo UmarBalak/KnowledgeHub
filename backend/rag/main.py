@@ -153,29 +153,7 @@ def require_maintainer(user: UserContext):
     if user.role != "maintainer":
         raise HTTPException(status_code=403, detail="Insufficient privileges")
 
-def delete_vectors_by_metadata(**kwargs):
-        """
-        Delete vectors matching the provided metadata filter.
-        Example usage from main.py: rag_pipeline.delete_vectors_by_metadata(doc_id="123")
-        """
-        try:
-            if not kwargs:
-                raise ValueError("No metadata filter provided for deletion.")
 
-            logger.info(f"Deleting vectors with metadata filter: {kwargs}")
-            
-            # Access the index via the Pinecone client instance (self.pcIndex)
-            index = self.pcIndex.Index(self.index_name)
-            
-            # Execute delete operation using the kwargs as the filter dictionary
-            index.delete(filter=kwargs)
-            
-            logger.info(f"Successfully deleted vectors matching {kwargs}")
-            
-        except Exception as e:
-            logger.error(f"Failed to delete vectors from Pinecone: {str(e)}", exc_info=True)
-            raise
-            
 def process_document_background(doc_id: int, space_id: int, file_type: str):
     """
     This runs AFTER the browser gets a response.
@@ -621,7 +599,7 @@ async def delete_document(
 
     # 2. Delete from Vector Database (Pinecone)
     try:
-        delete_vectors_by_metadata(doc_id=str(document_id))
+        rag_pipeline.delete_vectors_by_metadata(doc_id=str(document_id))
     except Exception as e:
         logging.error(f"Failed to delete vectors for doc {document_id}: {e}")
         # Proceeding anyway to ensure DB/Blob cleanup
