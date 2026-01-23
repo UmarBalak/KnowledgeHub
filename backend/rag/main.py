@@ -20,7 +20,7 @@ from starlette.responses import JSONResponse, Response
 from database import get_db, Base, engine, SessionLocal
 from models import Space, SpaceMembership, Document, DocumentChunk, QueryLog, SpaceRoleEnum, DisplayModeEnum
 from ragPipeline import RAGPipeline
-from blobStorage import upload_blob
+from blobStorage import upload_blob, delete_blob, extract_filename_from_url
 
 from pydantic import BaseModel, Field
 
@@ -587,16 +587,43 @@ async def delete_document(
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # 1. Fetch the document
     doc = db.query(Document).filter(
         Document.id == document_id,
         Document.uploader_id == userContext.google_id
     ).first()
+    
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).delete()
-    db.delete(doc)
-    db.commit()
+    # 2. Delete from Vector Database (Pinecone)
+    try:
+        # We assume your rag_pipeline instance exposes this method
+        rag_pipeline.delete_document_vectors(doc_id=str(document_id))
+    except Exception as e:
+        logging.error(f"Failed to delete vectors for doc {document_id}: {e}")
+        # Proceeding anyway to ensure DB/Blob cleanup
+
+    # 3. Delete from Blob Storage
+    try:
+        if doc.file_url:
+            # Use the safe extractor we added to blobStorage.py
+            filename = extract_filename_from_url(doc.file_url)
+            delete_blob(filename)
+    except Exception as e:
+        logging.error(f"Failed to delete blob for doc {document_id}: {e}")
+
+    # 4. Delete from SQL Database
+    try:
+        # Delete chunks first (foreign key dependency)
+        db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).delete()
+        # Delete document record
+        db.delete(doc)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database deletion failed: {e}")
+
     return {"message": "Document deleted successfully"}
 
 @app.get("/spaces/{space_id}/stats", response_model=SpaceStats)
