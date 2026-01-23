@@ -37,16 +37,28 @@ def delete_blob(filename: str) -> bool:
     try:
         container_client = blob_service_client.get_container_client(CONTAINER_NAME)
         blob_client = container_client.get_blob_client(filename)
+        # check if exists before deleting to avoid error
         if blob_client.exists():
             blob_client.delete_blob()
             print(f"Blob '{filename}' deleted successfully.")
             return True
-        else:
-            print(f"Blob '{filename}' not found.")
-            return False
+        print(f"Blob '{filename}' not found, skipping delete.")
+        return True # Return True as the goal (not existing) is met
     except Exception as e:
         print(f"Failed to delete blob: {e}")
         return False
+
+def extract_filename_from_url(blob_url: str) -> str:
+    """
+    Safely extracts the filename from the full URL based on the
+    environment configuration, mirroring the logic in download_blob_to_local.
+    """
+    prefix = f"{AZURE_BLOB_ACCOUNT_URL}/{CONTAINER_NAME}/"
+    if blob_url.startswith(prefix):
+        return blob_url[len(prefix):]
+    
+    # Fallback: if the prefix doesn't match (e.g. env var changed), try splitting
+    return blob_url.split("/")[-1]
 
 
 def download_blob_to_local(blob_url: str) -> str:
