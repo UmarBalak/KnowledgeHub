@@ -90,6 +90,24 @@ class PineconePipeline:
         except Exception as e:
             print(f"Error deleting index {index_name}: {e}")
 
+    def delete_vectors_by_metadata(self, filter_dict: dict):
+        """
+        Delete vectors matching the metadata filter.
+        Example filter: {"doc_id": "123"}
+        """
+        try:
+            # Get the index object directly to perform delete operations
+            index = self.pcIndex.Index(self.index_name)
+            
+            # Delete by metadata filter
+            index.delete(filter=filter_dict)
+            print(f"Deleted vectors with filter: {filter_dict}")
+            
+        except Exception as e:
+            print(f"Error deleting vectors from Pinecone: {e}")
+            # We raise the error so the main API knows the deletion was incomplete
+            raise e
+
 
 if __name__ == "__main__":
     # Example usage
