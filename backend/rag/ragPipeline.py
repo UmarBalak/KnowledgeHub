@@ -283,7 +283,7 @@ class RAGPipeline:
                 os.remove(file_path)
                 logger.debug(f"Cleaned up temporary file: {file_path}")
 
-      def delete_vectors_by_metadata(self, filter_dict: dict):
+    def delete_vectors_by_metadata(self, filter_dict: dict):
         """
         Delete vectors matching the metadata filter.
         Example filter: {"doc_id": "123"}
