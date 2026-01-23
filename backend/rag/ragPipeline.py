@@ -1,4 +1,4 @@
-import os
+  import os
 import json
 import hashlib
 from typing import Optional, List, Dict, Any, Tuple
@@ -31,7 +31,7 @@ from llmModels import LLM
 from llama_parse import LlamaParse
 from langchain_core.documents import Document
 parser = LlamaParse(
-    api_key=os.getenv["LLAMA_CLOUD_API_KEY"],
+    api_key=os.getenv("LLAMA_CLOUD_API_KEY"),
     result_type="markdown"  # Perfect for LLMs
 )
 
