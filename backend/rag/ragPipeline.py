@@ -160,6 +160,7 @@ class RAGPipeline:
         """Helper method to load document based on file type"""
         if file_type == "pdf":
             if use_docling:
+                
                 # OPTION A: Docling (High Quality, Slower)
                 # result = converter.convert(file_path) 
                 
@@ -173,6 +174,7 @@ class RAGPipeline:
                 #         metadata={"source": file_path}
                 #     )
                 # ]
+                pass
             else:
                 # OPTION B: PyMuPDF (Fast, Lower Quality)
                 # Returns a list of Documents (one per page)
