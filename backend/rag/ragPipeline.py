@@ -283,6 +283,24 @@ class RAGPipeline:
                 os.remove(file_path)
                 logger.debug(f"Cleaned up temporary file: {file_path}")
 
+        def delete_vectors_by_metadata(self, filter_dict: dict):
+          """
+          Delete vectors matching the metadata filter.
+          Example filter: {"doc_id": "123"}
+          """
+          try:
+              # Get the index object directly to perform delete operations
+              index = self.pcIndex.Index(self.index_name)
+              
+              # Delete by metadata filter
+              index.delete(filter=filter_dict)
+              logger.info(f"Deleted vectors with filter: {filter_dict}")
+              
+          except Exception as e:
+              logger.error(f"Error deleting vectors from Pinecone: {e}")
+              # We raise the error so the main API knows the deletion was incomplete
+              raise e
+
     # def get_document_context(self, document_id: str, start_char: int, end_char: int, 
     #                    context_chars: int = 500) -> Dict[str, Any]:
     #     """
