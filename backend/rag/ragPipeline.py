@@ -28,9 +28,12 @@ from database import get_db
 from sqlalchemy.orm import Session
 from llmModels import LLM
 
-# from langchain_core.documents import Document
-# from docling.document_converter import DocumentConverter
-# converter = DocumentConverter()
+from llama_parse import LlamaParse
+from langchain_core.documents import Document
+parser = LlamaParse(
+    api_key=os.getenv["LLAMA_CLOUD_API_KEY"],
+    result_type="markdown"  # Perfect for LLMs
+)
 
 load_dotenv()
 
@@ -156,29 +159,38 @@ class RAGPipeline:
         else:
             raise Exception(f"Failed to upload document {filename} to blob storage")
 
-    def _load_document(self, file_path: str, file_type: str, use_docling: bool = False) -> List[Document]:
+    def _load_document(self, file_path: str, file_type: str, llama_parser: bool = True) -> List[Document]:
         """Helper method to load document based on file type"""
         if file_type == "pdf":
-            if use_docling:
+            if llama_parser:
+                # OPTION A: LlamaParse (High Quality for RAG)
+                # Initialize parser
+                parser = LlamaParse(
+                    api_key=os.getenv("LLAMA_CLOUD_API_KEY"), 
+                    result_type="markdown",  # Markdown is best for RAG context
+                    verbose=True
+                )
                 
-                # OPTION A: Docling (High Quality, Slower)
-                # result = converter.convert(file_path) 
+                # 1. Parse the file (returns LlamaIndex documents)
+                llama_docs = parser.load_data(file_path)
                 
-                # Export to Markdown (Preserves tables and headers)
-                # markdown_text = result.document.export_to_markdown()
-                
-                # Return as a Single Document in a List
-                # return [
-                #     Document(
-                #         page_content=markdown_text,
-                #         metadata={"source": file_path}
-                #     )
-                # ]
-                pass
+                # 2. Convert LlamaIndex docs -> LangChain docs
+                # This ensures the format matches 'PyMuPDFLoader' and your 'txt' loader
+                langchain_docs = []
+                for doc in llama_docs:
+                    langchain_docs.append(
+                        Document(
+                            page_content=doc.text,
+                            metadata=doc.metadata or {}
+                        )
+                    )
+                return langchain_docs
+
             else:
                 # OPTION B: PyMuPDF (Fast, Lower Quality)
                 # Returns a list of Documents (one per page)
                 return PyMuPDFLoader(file_path).load()
+                
         elif file_type == "txt":
             with open(file_path, 'r', encoding='utf-8') as f:
                 return [Document(page_content=f.read())]
