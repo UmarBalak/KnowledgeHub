@@ -621,8 +621,7 @@ async def delete_document(
 
     # 2. Delete from Vector Database (Pinecone)
     try:
-        # We assume your rag_pipeline instance exposes this method
-        rag_pipeline.delete_vectors_by_metadata(doc_id=str(document_id))
+        delete_vectors_by_metadata(doc_id=str(document_id))
     except Exception as e:
         logging.error(f"Failed to delete vectors for doc {document_id}: {e}")
         # Proceeding anyway to ensure DB/Blob cleanup
