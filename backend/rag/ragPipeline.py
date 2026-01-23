@@ -28,6 +28,10 @@ from database import get_db
 from sqlalchemy.orm import Session
 from llmModels import LLM
 
+from langchain_core.documents import Document
+from docling.document_converter import DocumentConverter
+converter = DocumentConverter()
+
 load_dotenv()
 
 # Set up logging
@@ -152,10 +156,27 @@ class RAGPipeline:
         else:
             raise Exception(f"Failed to upload document {filename} to blob storage")
 
-    def _load_document(self, file_path: str, file_type: str) -> List[Document]:
+    def _load_document(self, file_path: str, file_type: str, use_docling: bool = True) -> List[Document]:
         """Helper method to load document based on file type"""
         if file_type == "pdf":
-            return PyMuPDFLoader(file_path).load()
+            if use_docling:
+                # OPTION A: Docling (High Quality, Slower)
+                result = converter.convert(file_path) 
+                
+                # Export to Markdown (Preserves tables and headers)
+                markdown_text = result.document.export_to_markdown()
+                
+                # Return as a Single Document in a List
+                return [
+                    Document(
+                        page_content=markdown_text,
+                        metadata={"source": file_path}
+                    )
+                ]
+            else:
+                # OPTION B: PyMuPDF (Fast, Lower Quality)
+                # Returns a list of Documents (one per page)
+                return PyMuPDFLoader(file_path).load()
         elif file_type == "txt":
             with open(file_path, 'r', encoding='utf-8') as f:
                 return [Document(page_content=f.read())]
