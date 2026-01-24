@@ -3,8 +3,7 @@ import pymupdf4llm
 import pymupdf
 import os
 from langchain_core.documents import Document
-from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_community.document_loaders import UnstructuredPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader, UnstructuredPDFLoader
 from typing import List
 from dotenv import load_dotenv
 import logging
@@ -23,30 +22,22 @@ def parse_pdf_unstructured(file_path: str) -> List[Document]:
     loader = UnstructuredPDFLoader(
         file_path,
         mode="elements",
-        strategy="fast"  # disables OCR
+        strategy="fast",  # disables OCR
+        chunking_strategy="by_title",    
+        max_characters=4000,             # Max chunk size
+        new_after_n_chars=3800,          # Soft limit
+        combine_text_under_n_chars=2000, # Avoid tiny chunks
     )
-    elements = loader.load()
+    
+    # Loader returns a list of semantically chunked Documents
+    docs = loader.load()
 
-    # Merge elements by page to match other parsers
-    page_map = {}
-    for el in elements:
-        page = el.metadata.get("page_number", 1)
-        page_map.setdefault(page, []).append(el.page_content)
+    # Normalize metadata
+    for doc in docs:
+        doc.metadata["parser"] = "unstructured"
+        doc.metadata["source"] = file_path
 
-    docs = []
-    for page, texts in page_map.items():
-        docs.append(
-            Document(
-                page_content="\n\n".join(texts),
-                metadata={
-                    "source": file_path,
-                    "page": page,
-                    "parser": "unstructured"
-                }
-            )
-        )
-
-    logger.info(f"Parsed {len(docs)} pages with unstructured")
+    logger.info(f"Generated {len(docs)} semantic chunks with unstructured")
     return docs
 
 def llama_parser(file_path: str) -> List[Document]:
@@ -66,22 +57,21 @@ def llama_parser(file_path: str) -> List[Document]:
     # 1. Parse the file (returns LlamaIndex documents)
     llama_docs = parser.load_data(file_path)
 
-    # 2. Convert LlamaIndex docs -> LangChain docs
-    langchain_docs = []
-    for i, doc in enumerate(llama_docs):
-        langchain_docs.append(
-            Document(
-                page_content=doc.text,
-                metadata=doc.metadata or {
-                    "source": file_path,
-                    "page": i + 1,
-                    "parser": "llama-parser"
-                }
-            )
-        )
+    full_text = "\n\n".join([doc.text for doc in llama_docs])
 
-    logger.info(f"Parsed {len(langchain_docs)} pages with llama_parser")
-    return langchain_docs
+    doc = [
+        Document(
+            page_content=full_text,
+            metadata={
+                "source": file_path,
+                "parser": "llama-parser",
+                "strategy": "continuous_markdown"
+            }
+        )
+    ]
+
+    logger.info(f"Parsed document with llama_parser")
+    return doc
 
 def parse_pdf4llm(file_path: str) -> List[Document]:
     """
@@ -93,31 +83,31 @@ def parse_pdf4llm(file_path: str) -> List[Document]:
     content = pymupdf.open(file_path)
     md_text = pymupdf4llm.to_markdown(content)
 
-    # Safety: ensure not double-escaped
-    if "\\n" in md_text:
-        import json
-        md_text = json.loads(f'"{md_text}"')
+    clean_text = md_text.replace("\n\n---\n\n", "\n\n")
 
-    docs = []
-    pages = md_text.split("\n\n---\n\n")  # pymupdf4llm page delimiter
+    # Safety check for JSON escaping issues common in some environments
+    if "\\n" in clean_text:
+        try:
+            import json
+            clean_text = json.loads(f'"{clean_text}"')
+        except:
+            pass # If json load fails, use raw text
 
-    for i, page_md in enumerate(pages):
-        if not page_md.strip():
-            continue
-
-        docs.append(
-            Document(
-                page_content=page_md.strip(),
-                metadata={
-                    "source": file_path,
-                    "page": i + 1,
-                    "parser": "pymupdf4llm"
-                }
-            )
+    # 3. Return as Single Document (or very large sections)
+    # This is "RAG Ready" because it preserves cross-page context.
+    doc = [
+        Document(
+            page_content=clean_text,
+            metadata={
+                "source": file_path,
+                "parser": "pymupdf4llm",
+                "strategy": "continuous_markdown"
+            }
         )
+    ]
 
-    logger.info(f"Parsed {len(docs)} pages with pdf4llm")
-    return docs
+    logger.info(f"Parsed document with pdf4llm")
+    return doc
 
 def load_document(file_path: str, file_type: str, mode: str = "auto") -> List[Document]:
     """
@@ -147,11 +137,21 @@ def load_document(file_path: str, file_type: str, mode: str = "auto") -> List[Do
         elif mode == "fast":
             logger.info(f"Loading PDF with PyMuPDFLoader (fast): {file_path}")
             # PyMuPDF (Fast, Lower Quality)
-            docs = PyMuPDFLoader(file_path).load()
-            # Add parser info to metadata
-            for doc in docs:
-                doc.metadata["parser"] = "pymupdf"
-            return docs
+            raw_docs = PyMuPDFLoader(file_path).load()
+
+            merged_text = "\n\n".join([d.page_content for d in raw_docs])
+            
+            doc = [
+                Document(
+                    page_content=merged_text, 
+                    metadata={
+                        "source": file_path, 
+                        "parser": "pymupdf_fast",
+                        "strategy": "merged_text"
+                    }
+                )
+            ] 
+            return doc
 
         elif mode == "auto":
             logger.info(f"Loading PDF with auto mode (defaulting to unstructured): {file_path}")
