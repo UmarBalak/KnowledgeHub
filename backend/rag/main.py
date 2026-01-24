@@ -1,4 +1,5 @@
 from ast import Dict
+
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Path, Cookie, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,9 +22,7 @@ from database import get_db, Base, engine, SessionLocal
 from models import Space, SpaceMembership, Document, DocumentChunk, QueryLog, SpaceRoleEnum, DisplayModeEnum
 from ragPipeline import RAGPipeline
 from blobStorage import upload_blob, delete_blob, extract_filename_from_url
-
 from pydantic import BaseModel, Field
-
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
@@ -36,8 +35,8 @@ app = FastAPI()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 FRONTEND_URL = os.getenv("FRONTEND_URL")
-security = HTTPBearer()
 
+security = HTTPBearer()
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,11 +51,10 @@ security = HTTPBearer()
 rag_pipeline = RAGPipeline(index_name="knowledgehub-main")
 
 # Pydantic response/request models
-
 class SpaceStats(BaseModel):
     total_docs: int
     user_docs: int
-    
+
 class UserContext(BaseModel):
     google_id: str
     name: Optional[str] = None
@@ -107,7 +105,7 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     query: str
     answer: str
-    sources: List[Dict[str, Any]] 
+    sources: List[Dict[str, Any]]
     context_chunks: int
     tokens_used: Dict[str, Any]
 
@@ -132,7 +130,6 @@ def get_user_llm(user_id):
         user_llm_cache[user_id] = LLM(gpt5=True)
     return user_llm_cache[user_id]
 
-
 # Dependency to extract user info from headers (set by frontend AuthContext)
 def get_current_user(request: Request) -> UserContext:
     user_id = request.headers.get("X-User-Id")
@@ -153,18 +150,22 @@ def require_maintainer(user: UserContext):
     if user.role != "maintainer":
         raise HTTPException(status_code=403, detail="Insufficient privileges")
 
-
 def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "auto"):
     """
     This runs AFTER the browser gets a response.
     It performs the heavy lifting: chunking, embedding, and indexing.
+    FIXED: Uses global chunk index for proper ordering
     """
-    db = SessionLocal() # Create a new independent DB session
+    db = SessionLocal()  # Create a new independent DB session
     try:
         # Re-fetch the document within this new session
         document = db.query(Document).filter(Document.id == doc_id).first()
         if not document:
             return
+
+        # Delete existing chunks before re-processing (idempotency)
+        db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).delete()
+        db.commit()
 
         # --- HEAVY RAG PIPELINE START ---
         metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
@@ -174,47 +175,52 @@ def process_document_background(doc_id: int, space_id: int, file_type: str, pars
             space_id=space_id,
             parse_mode=parse_mode
         )
-        
+
         # Update Document Status
         document.processing_status = metadata.status
         document.chunk_count = metadata.chunk_count
-        
-        # Save Chunks
+
+        # Save Chunks - FIXED: Use global chunk_index from metadata
         doc_chunks = []
         for chunk in chunked_docs:
             meta = chunk.metadata
             doc_chunk = DocumentChunk(
                 document_id=document.id,
-                chunk_order=meta['chunk_index'],
+                chunk_order=meta['chunk_index'],  # Now uses global index from fixed chunking
                 vector_id=meta.get('chunk_id'),
                 embedding_model=embedding_model,
                 created_at=meta.get('created_at')
             )
             doc_chunks.append(doc_chunk)
-        
+
         db.add_all(doc_chunks)
         db.commit()
         # --- HEAVY RAG PIPELINE END ---
 
-    except Exception as e:
-        print(f"Background processing failed: {e}")
-        # Update DB so the UI knows it failed later
-        document.processing_status = "failed"
-        document.error_message = str(e)
-        db.commit()
-    finally:
-        db.close() # Important: Close the background session
+        logging.info(f"Document {doc_id} processed successfully: {len(doc_chunks)} chunks stored")
 
+    except Exception as e:
+        logging.error(f"Background processing failed: {e}", exc_info=True)
+        db.rollback()  # Add explicit rollback
+        try:
+            document = db.query(Document).filter(Document.id == doc_id).first()
+            if document:
+                document.processing_status = "failed"
+                document.error_message = str(e)
+                db.commit()
+        except Exception as update_error:
+            logging.error(f"Failed to update error status: {update_error}")
+            db.rollback()
+    finally:
+        db.close()
 
 @app.get("/", response_model=dict)
 async def root():
     return {"message": "RAG Service is running."}
 
-
 @app.get("/health", response_class=JSONResponse)
 async def health_check():
     return {"status": "healthy"}
-
 
 @app.head("/health")
 async def health_check_monitor():
@@ -225,7 +231,6 @@ async def list_all_spaces(db: Session = Depends(get_db)):
     spaces = db.query(Space).all()
     return spaces
 
-
 @app.get("/spaces", response_model=List[SpaceOut])
 async def list_spaces(userContext=Depends(get_current_user), db: Session = Depends(get_db)):
     spaces = db.query(Space).join(SpaceMembership, Space.id == SpaceMembership.space_id).filter(
@@ -235,7 +240,7 @@ async def list_spaces(userContext=Depends(get_current_user), db: Session = Depen
 
 @app.post("/spaces/{space_id}/query", response_model=QueryResponse)
 async def query_space_documents(
-    query_request: QueryRequest,  # FastAPI parses JSON body here
+    query_request: QueryRequest,
     space_id: int = Path(...),
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -250,23 +255,9 @@ async def query_space_documents(
         raise HTTPException(status_code=403, detail="Not a space member")
 
     try:
-        # return {
-        #         "answer": answer,
-        #         "sources": [source["metadata"] for source in sources],  # For backward compatibility
-        #         "enhanced_sources": enhanced_sources,  # New enhanced sources
-        #         "tokens_used": tokens_used,
-        #         "context_chunks": len(retrieved_docs),
-        #         "query_text": query_text,
-        #         "response_metadata": {
-        #             "top_k": top_k,
-        #             "temperature": temperature,
-        #             "include_context": include_context,
-        #             "total_chunks_found": len(retrieved_docs)
-        #         }
-        #     }
-
         # Use per-user LLM instance
         llm = get_user_llm(userContext.google_id)
+
         result = rag_pipeline.query_with_template_method(
             query_text=query_request.query,
             top_k=query_request.top_k,
@@ -274,19 +265,8 @@ async def query_space_documents(
             space_id=space_id,
             llm_override=llm  # <--- pass user LLM!
         )
-        logging.info(f"Query result: answer length={len(result.get('answer', ''))}, tokens_used={result.get('tokens_used', 0)}")
-        # class QueryLog(Base):
-        #     __tablename__ = "query_logs"
 
-        #     id = Column(Integer, primary_key=True, index=True)
-        #     user_id = Column(String(36), nullable=False)  # UUID from external Auth service
-        #     query_text = Column(Text, nullable=False)
-        #     response_text = Column(Text)
-        #     sources = Column(JSON, nullable=True)
-        #     tokens_used = Column(Integer)
-        #     response_time = Column(Float)  # seconds
-        #     context_chunks = Column(Integer)
-        #     created_at = Column(DateTime(timezone=True), server_default=func.now())
+        logging.info(f"Query result: answer length={len(result.get('answer', ''))}, tokens_used={result.get('tokens_used', 0)}")
 
         # Record query log in DB
         query_log = QueryLog(
@@ -303,13 +283,6 @@ async def query_space_documents(
         db.commit()
         logging.info("QueryLog stored in db")
 
-        # class QueryResponse(BaseModel):
-        #     query: str
-        #     answer: str
-        #     sources: List[str] = []
-        #     context_chunks: List[str] = []
-        #     tokens_used: int
-
         return QueryResponse(
             query=query_request.query,
             answer=result.get('answer', ''),
@@ -317,15 +290,15 @@ async def query_space_documents(
             context_chunks=result.get("context_chunks"),
             tokens_used=result.get("tokens_used", 0),
         )
+
     except Exception as e:
         logging.error(f"Query failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
-
 @app.post("/spaces", response_model=SpaceOut)
 async def create_space(
     data: SpaceCreateIn,
-    userContext=Depends(get_current_user), 
+    userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     require_maintainer(userContext)
@@ -352,7 +325,6 @@ async def create_space(
 
     return space
 
-
 @app.post("/spaces/{space_id}/join")
 async def join_space(space_id: int = Path(...), userContext=Depends(get_current_user), db: Session = Depends(get_db)):
     # Check if already member
@@ -371,8 +343,8 @@ async def join_space(space_id: int = Path(...), userContext=Depends(get_current_
     )
     db.add(membership)
     db.commit()
-    return {"message": f"Joined space {space_id}"}
 
+    return {"message": f"Joined space {space_id}"}
 
 @app.post("/spaces/{space_id}/leave")
 async def leave_space(space_id: int = Path(...), userContext=Depends(get_current_user), db: Session = Depends(get_db)):
@@ -382,113 +354,23 @@ async def leave_space(space_id: int = Path(...), userContext=Depends(get_current
     ).first()
     if not membership:
         raise HTTPException(status_code=404, detail="Not a member")
+
     db.delete(membership)
     db.commit()
-    return {"message": f"Left space {space_id}"}
 
+    return {"message": f"Left space {space_id}"}
 
 @app.get("/spaces/{space_id}/members", response_model=List[str])
 async def list_space_members(space_id: int = Path(...), userContext=Depends(get_current_user), db: Session = Depends(get_db)):
     # Enforce member info visibility only if current user is member
     if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
+
     member_ids = db.query(SpaceMembership.user_id).filter(
         SpaceMembership.space_id == space_id
     ).all()
+
     return [m[0] for m in member_ids]
-
-
-# @app.post("/spaces/{space_id}/documents/upload", response_model=DocumentResponse)
-# async def upload_document(
-#     space_id: int = Path(...),
-#     file: UploadFile = File(...),
-#     title: str = Form(...),
-#     userContext=Depends(get_current_user),
-#     db: Session = Depends(get_db)
-# ):
-#     if not is_user_member(db, userContext.google_id, space_id):
-#         raise HTTPException(status_code=403, detail="Not a space member")
-    
-#     # Dynamically determine file type
-#     allowed_types = {
-#         "text/plain": ("txt", ".txt"),
-#         "application/pdf": ("pdf", ".pdf")
-#     }
-    
-#     if file.content_type not in allowed_types:
-#         raise HTTPException(
-#             status_code=400, 
-#             detail=f"Unsupported file type. Supported: {', '.join(allowed_types.keys())}"
-#         )
-    
-#     file_type, extension = allowed_types[file.content_type]
-    
-#     # Read file content
-#     file_content = await file.read()
-    
-#     # Generate unique filename with correct extension
-#     unique_filename = f"{uuid.uuid4()}{extension}"
-    
-#     # Upload to blob storage
-#     upload_success = upload_blob(file_content, unique_filename)
-#     if not upload_success:
-#         raise HTTPException(status_code=500, detail="Failed to upload file to storage")
-    
-#     # Create document record
-#     document = Document(
-#         title=title,
-#         file_url=f"{os.getenv('BLOB_SAS_URL')}/{os.getenv('BLOB_CONTAINER_NAME')}/{unique_filename}",
-#         file_type=file_type,  # Now dynamic
-#         file_size=len(file_content),
-#         uploader_id=userContext.google_id,
-#         space_id=space_id,
-#         uploaded_at=datetime.utcnow(),
-#         processing_status="pending",
-#         chunk_count=0,
-#         error_message=None,
-#         source_name="User Upload",
-#         display_mode=DisplayModeEnum.generated_answer
-#     )
-    
-#     db.add(document)
-#     db.commit()
-#     db.refresh(document)
-    
-#     try:
-#         # Pass dynamic file_type to pipeline
-#         metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
-#             blob_url=document.file_url,
-#             file_type=file_type,
-#             doc_id=str(document.id),
-#             space_id=space_id
-#         )
-        
-#         document.processing_status = metadata.status
-#         document.chunk_count = metadata.chunk_count
-        
-#         # Save chunks to database
-#         doc_chunks = []
-#         for chunk in chunked_docs:
-#             meta = chunk.metadata
-#             doc_chunk = DocumentChunk(
-#                 document_id=document.id,
-#                 chunk_order=meta['chunk_index'],
-#                 vector_id=meta.get('chunk_id'),
-#                 embedding_model=embedding_model,
-#                 created_at=meta.get('created_at')
-#             )
-#             doc_chunks.append(doc_chunk)
-        
-#         db.add_all(doc_chunks)
-#         db.commit()
-        
-#     except Exception as e:
-#         document.processing_status = "failed"
-#         document.error_message = str(e)
-#         db.commit()
-#         raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
-    
-#     return DocumentResponse.model_validate(document)
 
 @app.post("/spaces/{space_id}/documents/upload", response_model=DocumentResponse)
 async def upload_document(
@@ -496,36 +378,34 @@ async def upload_document(
     file: UploadFile = File(...),
     title: str = Form(...),
     parse_mode: str = Form("auto"),
-    background_tasks: BackgroundTasks = BackgroundTasks(), # <--- Add this
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # 1. Validation Logic
     if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
-    
+
     allowed_types = {"text/plain": ("txt", ".txt"), "application/pdf": ("pdf", ".pdf")}
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Unsupported file type")
-    
-    ALLOWED_PARSE_MODES = {"auto", "unstructured", "pdf4llm", "llama"}
 
+    ALLOWED_PARSE_MODES = {"auto", "unstructured", "pdf4llm", "llama", "fast", "balanced"}
     if parse_mode not in ALLOWED_PARSE_MODES:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid parse_mode. Allowed: {ALLOWED_PARSE_MODES}"
         )
 
-    
     file_type, extension = allowed_types[file.content_type]
     file_content = await file.read()
     unique_filename = f"{uuid.uuid4()}{extension}"
-    
+
     # 2. Upload to Blob (Quick)
     upload_success = upload_blob(file_content, unique_filename)
     if not upload_success:
         raise HTTPException(status_code=500, detail="Failed to upload file")
-    
+
     # 3. Create DB Record with "pending" status (Quick)
     document = Document(
         title=title,
@@ -535,30 +415,28 @@ async def upload_document(
         uploader_id=userContext.google_id,
         space_id=space_id,
         uploaded_at=datetime.utcnow(),
-        processing_status="pending", # <--- Important: Initial status
+        processing_status="pending",  # <--- Important: Initial status
         chunk_count=0,
         source_name="User Upload",
         display_mode=DisplayModeEnum.generated_answer
     )
-    
     db.add(document)
     db.commit()
     db.refresh(document)
-    
+
     # 4. Schedule the Heavy Task (Fire and Forget)
     background_tasks.add_task(
-        process_document_background, 
-        doc_id=document.id, 
-        space_id=space_id, 
+        process_document_background,
+        doc_id=document.id,
+        space_id=space_id,
         file_type=file_type,
         parse_mode=parse_mode
     )
-    
+
     # 5. Return immediately!
     # The browser receives this response in ~1-2 seconds.
     # The background task continues running on the server.
     return DocumentResponse.model_validate(document)
-
 
 @app.get("/spaces/{space_id}/documents", response_model=List[DocumentResponse])
 async def list_documents(
@@ -577,7 +455,6 @@ async def list_documents(
 
     return [DocumentResponse.model_validate(d) for d in docs]
 
-
 @app.get("/documents/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: int = Path(...),
@@ -593,7 +470,6 @@ async def get_document(
 
     return DocumentResponse.model_validate(doc)
 
-
 @app.delete("/documents/{document_id}")
 async def delete_document(
     document_id: int = Path(...),
@@ -605,7 +481,6 @@ async def delete_document(
         Document.id == document_id,
         Document.uploader_id == userContext.google_id
     ).first()
-    
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -619,7 +494,6 @@ async def delete_document(
     # 3. Delete from Blob Storage
     try:
         if doc.file_url:
-            # Use the safe extractor we added to blobStorage.py
             filename = extract_filename_from_url(doc.file_url)
             delete_blob(filename)
     except Exception as e:
@@ -650,9 +524,8 @@ async def get_space_stats(
 
     # Efficient SQL count queries
     total = db.query(Document).filter(Document.space_id == space_id).count()
-    
     user_count = db.query(Document).filter(
-        Document.space_id == space_id, 
+        Document.space_id == space_id,
         Document.uploader_id == userContext.google_id
     ).count()
 
@@ -665,14 +538,15 @@ async def delete_space(
     db: Session = Depends(get_db),
 ):
     require_maintainer(userContext)
+
     space = db.query(Space).filter(Space.id == space_id).first()
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
-    
-    # Optionally check or cascade delete members, documents...
 
+    # Optionally check or cascade delete members, documents...
     db.delete(space)
     db.commit()
+
     return {"detail": "Space deleted"}
 
 @app.get("/system/info")
@@ -684,5 +558,5 @@ async def system_info(
     return {
         "user_documents": user_doc_count,
         "rag_index": rag_pipeline.index_name,
-        "supported_formats": ["TXT"]  # Currently only plain text supported
+        "supported_formats": ["TXT", "PDF"]  # Updated to include PDF
     }
