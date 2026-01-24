@@ -130,11 +130,11 @@ def load_document(file_path: str, file_type: str, mode: str = "auto") -> List[Do
             logger.info(f"Loading PDF with unstructured parser: {file_path}")
             return parse_pdf_unstructured(file_path)
 
-        elif mode == "balanced":
+        elif mode == "pdf4llm":
             logger.info(f"Loading PDF with pdf4llm (balanced): {file_path}")
             return parse_pdf4llm(file_path)
 
-        elif mode == "fast":
+        elif mode == "auto":
             logger.info(f"Loading PDF with PyMuPDFLoader (fast): {file_path}")
             # PyMuPDF (Fast, Lower Quality)
             raw_docs = PyMuPDFLoader(file_path).load()
@@ -152,10 +152,6 @@ def load_document(file_path: str, file_type: str, mode: str = "auto") -> List[Do
                 )
             ] 
             return doc
-
-        elif mode == "auto":
-            logger.info(f"Loading PDF with auto mode (defaulting to unstructured): {file_path}")
-            return parse_pdf_unstructured(file_path)
 
         else:
             raise ValueError(f"Unknown parse mode for PDF: {mode}")
