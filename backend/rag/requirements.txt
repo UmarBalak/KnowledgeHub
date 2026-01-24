@@ -147,3 +147,8 @@ yarl==1.20.1
 zipp==3.23.0
 zstandard==0.24.0
 llama-parse
+pymupdf4llm
+pymupdf-layout
+unstructured
+unstructured[local-inference]
+

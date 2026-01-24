@@ -27,6 +27,7 @@ from blobStorage import download_blob_to_local, upload_blob
 from database import get_db
 from sqlalchemy.orm import Session
 from llmModels import LLM
+from load_doc import load_document
 
 from llama_parse import LlamaParse
 from langchain_core.documents import Document
@@ -159,44 +160,6 @@ class RAGPipeline:
         else:
             raise Exception(f"Failed to upload document {filename} to blob storage")
 
-    def _load_document(self, file_path: str, file_type: str, llama_parser: bool = True) -> List[Document]:
-        """Helper method to load document based on file type"""
-        if file_type == "pdf":
-            if llama_parser:
-                # OPTION A: LlamaParse (High Quality for RAG)
-                # Initialize parser
-                parser = LlamaParse(
-                    api_key=os.getenv("LLAMA_CLOUD_API_KEY"), 
-                    result_type="markdown",  # Markdown is best for RAG context
-                    verbose=True
-                )
-                
-                # 1. Parse the file (returns LlamaIndex documents)
-                llama_docs = parser.load_data(file_path)
-                
-                # 2. Convert LlamaIndex docs -> LangChain docs
-                # This ensures the format matches 'PyMuPDFLoader' and your 'txt' loader
-                langchain_docs = []
-                for doc in llama_docs:
-                    langchain_docs.append(
-                        Document(
-                            page_content=doc.text,
-                            metadata=doc.metadata or {}
-                        )
-                    )
-                return langchain_docs
-
-            else:
-                # OPTION B: PyMuPDF (Fast, Lower Quality)
-                # Returns a list of Documents (one per page)
-                return PyMuPDFLoader(file_path).load()
-                
-        elif file_type == "txt":
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return [Document(page_content=f.read())]
-        else:
-            raise ValueError(f"Unsupported file type: {file_type}")
-
     def _create_enhanced_chunks_with_metadata(self, content: str, filename: str, document_id: str, space_id: int,  
                                             blob_url: str, file_type: str = "text") -> List[Document]:
         """Create text chunks with detailed metadata for precise tracking"""
@@ -208,7 +171,10 @@ class RAGPipeline:
         
         for i, chunk_text in enumerate(chunk_texts):
             # Find the actual position of this chunk in the original text
-            start_pos = content.find(chunk_text, current_pos)
+            start_pos = current_pos
+            end_pos = start_pos + len(chunk_text)
+            current_pos = end_pos
+
             if start_pos == -1:  # Fallback if exact match not found
                 start_pos = current_pos
             end_pos = start_pos + len(chunk_text)
@@ -254,7 +220,7 @@ class RAGPipeline:
 
         return chunks
 
-    def process_and_index_document(self, blob_url: str, file_type: str, doc_id: str, space_id: int) -> DocumentMetadata:
+    def process_and_index_document(self, blob_url: str, file_type: str, doc_id: str, space_id: int, parse_mode: str = "auto") -> DocumentMetadata:
         """
         Enhanced document processing with detailed chunk tracking and original document storage.
         Maintains compatibility with existing interface.
@@ -267,26 +233,44 @@ class RAGPipeline:
             
             # Download and load document
             file_path = download_blob_to_local(blob_url)
-            documents = self._load_document(file_path, file_type)
+            documents = load_document(file_path, file_type, parse_mode)
             
             # Extract text content
             if len(documents) == 1:
-                content = documents[0].page_content
+                full_content = documents[0].page_content
             else:
-                content = "\n\n".join([doc.page_content for doc in documents])
+                full_content = "\n\n".join([doc.page_content for doc in documents])
             
             # Generate enhanced document ID
             filename = f"doc_{doc_id}"
-            enhanced_doc_id = self._generate_document_id(filename, content, doc_id)
+            enhanced_doc_id = self._generate_document_id(filename, full_content, doc_id)
             
             # Upload original document to blob storage for context retrieval
-            original_blob_url = self._upload_original_document(content, filename, enhanced_doc_id)
+            original_blob_url = self._upload_original_document(full_content, filename, enhanced_doc_id)
             logger.info(f"Uploaded original document to blob: {original_blob_url}")
             
             # Create enhanced chunks with detailed metadata
-            chunked_docs = self._create_enhanced_chunks_with_metadata(
-                content, filename, enhanced_doc_id, space_id, original_blob_url, file_type
-            )
+            chunked_docs = []
+
+            for doc in documents:
+                page_content = doc.page_content
+                page = doc.metadata.get("page")
+
+                page_chunks = self._create_enhanced_chunks_with_metadata(
+                    page_content,
+                    filename,
+                    enhanced_doc_id,
+                    space_id,
+                    original_blob_url,
+                    file_type
+                )
+
+                for c in page_chunks:
+                    c.metadata["page"] = page
+                    c.metadata["parser"] = doc.metadata.get("parser")
+
+                chunked_docs.extend(page_chunks)
+
             
             metadata.chunk_count = len(chunked_docs)
             logger.info(f"Split document into {len(chunked_docs)} enhanced chunks")

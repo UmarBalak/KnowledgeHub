@@ -154,7 +154,7 @@ def require_maintainer(user: UserContext):
         raise HTTPException(status_code=403, detail="Insufficient privileges")
 
 
-def process_document_background(doc_id: int, space_id: int, file_type: str):
+def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "auto"):
     """
     This runs AFTER the browser gets a response.
     It performs the heavy lifting: chunking, embedding, and indexing.
@@ -171,7 +171,8 @@ def process_document_background(doc_id: int, space_id: int, file_type: str):
             blob_url=document.file_url,
             file_type=file_type,
             doc_id=str(document.id),
-            space_id=space_id
+            space_id=space_id,
+            parse_mode=parse_mode
         )
         
         # Update Document Status
@@ -494,17 +495,27 @@ async def upload_document(
     space_id: int = Path(...),
     file: UploadFile = File(...),
     title: str = Form(...),
+    parse_mode: str = Form("auto"),
     background_tasks: BackgroundTasks = BackgroundTasks(), # <--- Add this
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 1. Validation Logic (Same as before)
+    # 1. Validation Logic
     if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
     
     allowed_types = {"text/plain": ("txt", ".txt"), "application/pdf": ("pdf", ".pdf")}
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Unsupported file type")
+    
+    ALLOWED_PARSE_MODES = {"auto", "unstructured", "pdf4llm", "llama"}
+
+    if parse_mode not in ALLOWED_PARSE_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parse_mode. Allowed: {ALLOWED_PARSE_MODES}"
+        )
+
     
     file_type, extension = allowed_types[file.content_type]
     file_content = await file.read()
@@ -539,7 +550,8 @@ async def upload_document(
         process_document_background, 
         doc_id=document.id, 
         space_id=space_id, 
-        file_type=file_type
+        file_type=file_type,
+        parse_mode=parse_mode
     )
     
     # 5. Return immediately!
