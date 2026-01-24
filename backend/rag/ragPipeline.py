@@ -218,7 +218,7 @@ class RAGPipeline:
         file_type: str, 
         doc_id: str, 
         space_id: int, 
-        parse_mode: str = "auto"
+        parse_mode: str = "fast"
     ) -> Tuple[DocumentMetadata, List[Document], str, str]:  # Added str for enhanced_doc_id
         """
         Enhanced document processing with detailed chunk tracking.
@@ -255,7 +255,6 @@ class RAGPipeline:
             
             for doc in documents:
                 page_content = doc.page_content
-                page = doc.metadata.get("page")
                 
                 page_chunks, global_chunk_index = self._create_enhanced_chunks_with_metadata(
                     page_content,
@@ -269,7 +268,6 @@ class RAGPipeline:
                 
                 # Add page and parser info to each chunk
                 for c in page_chunks:
-                    c.metadata["page"] = page
                     c.metadata["parser"] = doc.metadata.get("parser")
                 
                 chunked_docs.extend(page_chunks)

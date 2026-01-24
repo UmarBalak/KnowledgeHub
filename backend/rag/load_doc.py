@@ -15,30 +15,41 @@ load_dotenv()
 
 def parse_pdf_unstructured(file_path: str) -> List[Document]:
     """
-    Medium accuracy but slower, good for unstructured pdf.
-    Returns text elements merged by page.
+    Medium accuracy.
+    RAG-OPTIMIZED: Uses 'by_title' to detect structure, but MERGES results
+    so the pipeline handles character offsets correctly.
     """
     logger.info("Using unstructured parser")
     loader = UnstructuredPDFLoader(
         file_path,
         mode="elements",
-        strategy="fast",  # disables OCR
+        strategy="fast", 
         chunking_strategy="by_title",    
-        max_characters=4000,             # Max chunk size
-        new_after_n_chars=3800,          # Soft limit
-        combine_text_under_n_chars=2000, # Avoid tiny chunks
+        max_characters=4000,
+        new_after_n_chars=3800,
+        combine_text_under_n_chars=2000,
     )
     
-    # Loader returns a list of semantically chunked Documents
-    docs = loader.load()
+    # 1. Get semantically chunked elements
+    raw_docs = loader.load()
 
-    # Normalize metadata
-    for doc in docs:
-        doc.metadata["parser"] = "unstructured"
-        doc.metadata["source"] = file_path
+    # 2. MERGE into one continuous text block
+    # This ensures your pipeline's TextSplitter calculates global 
+    # start_char/end_char offsets correctly relative to the file start.
+    full_text = "\n\n".join([doc.page_content for doc in raw_docs])
 
-    logger.info(f"Generated {len(docs)} semantic chunks with unstructured")
-    return docs
+    # 3. Return as single document
+    doc = [
+        Document(
+            page_content=full_text,
+            metadata={
+                "source": file_path,
+                "parser": "unstructured",
+            }
+        )
+    ]
+
+    return doc
 
 def llama_parser(file_path: str) -> List[Document]:
     """
@@ -65,7 +76,6 @@ def llama_parser(file_path: str) -> List[Document]:
             metadata={
                 "source": file_path,
                 "parser": "llama-parser",
-                "strategy": "continuous_markdown"
             }
         )
     ]
@@ -101,7 +111,6 @@ def parse_pdf4llm(file_path: str) -> List[Document]:
             metadata={
                 "source": file_path,
                 "parser": "pymupdf4llm",
-                "strategy": "continuous_markdown"
             }
         )
     ]
@@ -147,7 +156,6 @@ def load_document(file_path: str, file_type: str, mode: str = "auto") -> List[Do
                     metadata={
                         "source": file_path, 
                         "parser": "pymupdf_fast",
-                        "strategy": "merged_text"
                     }
                 )
             ] 
