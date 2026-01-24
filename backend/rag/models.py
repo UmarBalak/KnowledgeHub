@@ -95,17 +95,19 @@ class DocumentChunk(Base):
 
     # Relationships
     document = relationship("Document", back_populates="chunks")
-
-
+    
 class QueryLog(Base):
     __tablename__ = "query_logs"
-
+    
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String(36), nullable=False)  # UUID from external Auth service
-    query_text = Column(Text, nullable=False)
-    response_text = Column(Text)
+    user_id = Column(String(36), nullable=False)
+    query_hash = Column(String(64), index=True, nullable=False)  # SHA-256 hash
+    query_embedding = Column(JSON, nullable=False)  # Vector for semantic matching
+    response_text = Column(Text, nullable=False)
     sources = Column(JSON, nullable=True)
     tokens_used = Column(JSON)
-    response_time = Column(Float)  # seconds
+    response_time = Column(Float)
     context_chunks = Column(Integer)
+    space_id = Column(Integer, nullable=False, index=True)  # Important for filtering
+    hit_count = Column(Integer, default=1)  # Track cache reuse
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from starlette.responses import Response
 from starlette.status import HTTP_401_UNAUTHORIZED
+import hashlib
 from typing import List, Optional, Any, Dict
 import logging
 import json
@@ -26,6 +27,14 @@ from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
+
+def generate_query_hash(query_text: str, space_id: int) -> str:
+    """Generate deterministic SHA-256 hash of normalized query"""
+    # Normalize: lowercase, strip whitespace, remove extra spaces
+    normalized = " ".join(query_text.lower().strip().split())
+    content = f"{normalized}:{space_id}"
+    return hashlib.sha256(content.encode()).hexdigest()
+
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -238,6 +247,7 @@ async def list_spaces(userContext=Depends(get_current_user), db: Session = Depen
     ).all()
     return spaces
 
+
 @app.post("/spaces/{space_id}/query", response_model=QueryResponse)
 async def query_space_documents(
     query_request: QueryRequest,
@@ -246,54 +256,91 @@ async def query_space_documents(
     db: Session = Depends(get_db)
 ):
     logging.info(
-        f"Query request received: user_id={userContext.google_id}, space_id={space_id}, "
-        f"query={query_request.query}, top_k={query_request.top_k}, temperature={query_request.temperature}"
+        f"Query request: user={userContext.google_id}, space={space_id}, "
+        f"query='{query_request.query}'"
     )
-
+    
     if not is_user_member(db, userContext.google_id, space_id):
         logging.warning(f"Access denied: User {userContext.google_id} not member of space {space_id}")
         raise HTTPException(status_code=403, detail="Not a space member")
-
+    
     try:
-        # Use per-user LLM instance
+        import time
+        start_time = time.time()
+        
+        # Generate query hash for privacy-conscious caching
+        query_hash = generate_query_hash(query_request.query, space_id)
+        
+        # 🔍 CHECK CACHE FIRST (saves tokens and time!)
+        cached_result = rag_pipeline.check_query_cache(
+            query_hash=query_hash,
+            query_text=query_request.query,
+            space_id=space_id,
+            db=db,
+            similarity_threshold=0.95  # Adjust: 0.90-0.98 recommended
+        )
+        
+        if cached_result:
+            response_time = time.time() - start_time
+            logging.info(f"✅ Returned cached response in {response_time:.2f}s")
+            
+            return QueryResponse(
+                query=query_request.query,
+                answer=cached_result["answer"],
+                sources=cached_result["sources"],
+                context_chunks=cached_result["context_chunks"],
+                tokens_used=cached_result["tokens_used"]
+            )
+        
+        # ❌ CACHE MISS - Call LLM
+        logging.info("Cache miss. Invoking LLM...")
         llm = get_user_llm(userContext.google_id)
-
+        
         result = rag_pipeline.query_with_template_method(
             query_text=query_request.query,
             top_k=query_request.top_k,
             temperature=query_request.temperature,
             space_id=space_id,
-            llm_override=llm  # <--- pass user LLM!
+            llm_override=llm
         )
-
-        logging.info(f"Query result: answer length={len(result.get('answer', ''))}, tokens_used={result.get('tokens_used', 0)}")
-
-        # Record query log in DB
+        
+        response_time = time.time() - start_time
+        
+        # 💾 STORE IN CACHE with hash + embedding
+        query_embedding = rag_pipeline.embeddings.embed_query(query_request.query)
+        
         query_log = QueryLog(
             user_id=userContext.google_id,
-            query_text=query_request.query,
+            query_hash=query_hash,  # Privacy: hash instead of plain text
+            query_embedding=query_embedding,  # For semantic matching
             response_text=result.get("answer", ""),
-            sources=json.dumps(result.get("sources", [])),  # serialize to str here
-            tokens_used=result.get("tokens_used", 0),
-            response_time=result.get("response_time", 0.0),
-            context_chunks=result.get("context_chunks"),
-            created_at=datetime.utcnow(),
+            sources=result.get("sources", []),  # Store as JSON directly
+            tokens_used=result.get("tokens_used", {}),
+            response_time=response_time,
+            context_chunks=result.get("context_chunks", 0),
+            space_id=space_id,
+            hit_count=1,
+            created_at=datetime.utcnow()
         )
+        
         db.add(query_log)
         db.commit()
-        logging.info("QueryLog stored in db")
-
+        
+        logging.info(f"✅ Query cached with hash. Response time: {response_time:.2f}s")
+        
         return QueryResponse(
             query=query_request.query,
             answer=result.get('answer', ''),
             sources=result.get("sources", []),
-            context_chunks=result.get("context_chunks"),
-            tokens_used=result.get("tokens_used", 0),
+            context_chunks=result.get("context_chunks", 0),
+            tokens_used=result.get("tokens_used", {}),
         )
-
+        
     except Exception as e:
         logging.error(f"Query failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
 
 @app.post("/spaces", response_model=SpaceOut)
 async def create_space(
