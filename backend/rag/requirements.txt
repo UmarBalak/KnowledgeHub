@@ -97,7 +97,7 @@ pydantic_core==2.33.2
 Pygments==2.19.2
 PyJWT==2.10.1
 pymssql==2.3.7
-PyMuPDF==1.26.4
+PyMuPDF
 pyodbc==5.2.0
 pytest==8.4.1
 pytest-asyncio==0.26.0
