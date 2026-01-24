@@ -134,7 +134,7 @@ def load_document(file_path: str, file_type: str, mode: str = "auto") -> List[Do
             logger.info(f"Loading PDF with pdf4llm (balanced): {file_path}")
             return parse_pdf4llm(file_path)
 
-        elif mode == "auto":
+        elif mode == "fast":
             logger.info(f"Loading PDF with PyMuPDFLoader (fast): {file_path}")
             # PyMuPDF (Fast, Lower Quality)
             raw_docs = PyMuPDFLoader(file_path).load()
