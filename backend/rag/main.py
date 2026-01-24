@@ -57,7 +57,7 @@ app.add_middleware(
 )
 
 security = HTTPBearer()
-rag_pipeline = RAGPipeline(index_name="knowledgehub-main")
+rag_pipeline = RAGPipeline(index_name=os.getenv("PINECONE_INDEX_NAME"))
 
 # Pydantic response/request models
 class SpaceStats(BaseModel):
@@ -159,58 +159,57 @@ def require_maintainer(user: UserContext):
     if user.role != "maintainer":
         raise HTTPException(status_code=403, detail="Insufficient privileges")
 
+
 def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "auto"):
     """
-    This runs AFTER the browser gets a response.
-    It performs the heavy lifting: chunking, embedding, and indexing.
-    FIXED: Uses global chunk index for proper ordering
+    Background processing task that stores the enhanced document ID
     """
-    db = SessionLocal()  # Create a new independent DB session
+    db = SessionLocal()
     try:
-        # Re-fetch the document within this new session
         document = db.query(Document).filter(Document.id == doc_id).first()
         if not document:
             return
-
-        # Delete existing chunks before re-processing (idempotency)
+        
+        # Delete existing chunks before re-processing
         db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).delete()
         db.commit()
-
-        # --- HEAVY RAG PIPELINE START ---
-        metadata, chunked_docs, embedding_model = rag_pipeline.process_and_index_document(
+        
+        # Process document and get enhanced doc ID
+        metadata, chunked_docs, embedding_model, enhanced_doc_id = rag_pipeline.process_and_index_document(
             blob_url=document.file_url,
             file_type=file_type,
             doc_id=str(document.id),
             space_id=space_id,
             parse_mode=parse_mode
         )
-
-        # Update Document Status
+        
+        # Update Document with status AND enhanced doc ID
         document.processing_status = metadata.status
         document.chunk_count = metadata.chunk_count
-
-        # Save Chunks - FIXED: Use global chunk_index from metadata
+        document.vector_doc_id = enhanced_doc_id  # ✅ STORE THIS!
+        
+        # Save Chunks
         doc_chunks = []
         for chunk in chunked_docs:
             meta = chunk.metadata
             doc_chunk = DocumentChunk(
                 document_id=document.id,
-                chunk_order=meta['chunk_index'],  # Now uses global index from fixed chunking
+                chunk_order=meta['chunk_index'],
                 vector_id=meta.get('chunk_id'),
                 embedding_model=embedding_model,
                 created_at=meta.get('created_at')
             )
             doc_chunks.append(doc_chunk)
-
+        
         db.add_all(doc_chunks)
         db.commit()
-        # --- HEAVY RAG PIPELINE END ---
-
+        
         logging.info(f"Document {doc_id} processed successfully: {len(doc_chunks)} chunks stored")
-
+        logging.info(f"Enhanced doc ID: {enhanced_doc_id}")
+        
     except Exception as e:
         logging.error(f"Background processing failed: {e}", exc_info=True)
-        db.rollback()  # Add explicit rollback
+        db.rollback()
         try:
             document = db.query(Document).filter(Document.id == doc_id).first()
             if document:
@@ -222,6 +221,8 @@ def process_document_background(doc_id: int, space_id: int, file_type: str, pars
             db.rollback()
     finally:
         db.close()
+
+
 
 @app.get("/", response_model=dict)
 async def root():
@@ -528,16 +529,24 @@ async def delete_document(
         Document.id == document_id,
         Document.uploader_id == userContext.google_id
     ).first()
+    
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-
-    # 2. Delete from Vector Database (Pinecone)
+    
+    # 2. Delete from Vector Database (Pinecone) using CORRECT doc ID
     try:
-        rag_pipeline.delete_vectors_by_metadata(filter_dict={"doc_id": str(document_id)})
+        if doc.vector_doc_id:
+            # ✅ Use the stored enhanced doc ID
+            rag_pipeline.delete_vectors_by_metadata(filter_dict={"document_id": doc.vector_doc_id})
+            logging.info(f"Deleted vectors for enhanced doc_id: {doc.vector_doc_id}")
+        else:
+            # Fallback for old documents without vector_doc_id
+            logging.warning(f"No vector_doc_id found for doc {document_id}, trying simple doc_id")
+            rag_pipeline.delete_vectors_by_metadata(filter_dict={"doc_id": str(document_id)})
     except Exception as e:
         logging.error(f"Failed to delete vectors for doc {document_id}: {e}")
         # Proceeding anyway to ensure DB/Blob cleanup
-
+    
     # 3. Delete from Blob Storage
     try:
         if doc.file_url:
@@ -545,7 +554,7 @@ async def delete_document(
             delete_blob(filename)
     except Exception as e:
         logging.error(f"Failed to delete blob for doc {document_id}: {e}")
-
+    
     # 4. Delete from SQL Database
     try:
         # Delete chunks first (foreign key dependency)
@@ -556,7 +565,7 @@ async def delete_document(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database deletion failed: {e}")
-
+    
     return {"message": "Document deleted successfully"}
 
 @app.get("/spaces/{space_id}/stats", response_model=SpaceStats)

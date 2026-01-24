@@ -212,64 +212,72 @@ class RAGPipeline:
         next_index = start_index + len(chunk_texts)
         return chunks, next_index
 
-    def process_and_index_document(self, blob_url: str, file_type: str, doc_id: str, space_id: int, parse_mode: str = "auto") -> Tuple[DocumentMetadata, List[Document], str]:
+    def process_and_index_document(
+        self, 
+        blob_url: str, 
+        file_type: str, 
+        doc_id: str, 
+        space_id: int, 
+        parse_mode: str = "auto"
+    ) -> Tuple[DocumentMetadata, List[Document], str, str]:  # Added str for enhanced_doc_id
         """
-        Enhanced document processing with detailed chunk tracking and original document storage.
-        Maintains compatibility with existing interface.
+        Enhanced document processing with detailed chunk tracking.
+        Returns: (metadata, chunked_docs, embedding_model, enhanced_doc_id)
         """
         metadata = DocumentMetadata(doc_id=doc_id, space_id=space_id, file_type=file_type, blob_url=blob_url)
         file_path = None
-
+        enhanced_doc_id = None  # Initialize
+        
         try:
             logger.info(f"Starting enhanced processing of document {doc_id}")
-
+            
             # Download and load document
             file_path = download_blob_to_local(blob_url)
             documents = load_document(file_path, file_type, parse_mode)
-
+            
             # Extract text content
             if len(documents) == 1:
                 full_content = documents[0].page_content
             else:
                 full_content = "\n\n".join([doc.page_content for doc in documents])
-
+            
             # Generate enhanced document ID
             filename = f"doc_{doc_id}"
-            enhanced_doc_id = self._generate_document_id(filename, full_content, doc_id)
-
-            # Upload original document to blob storage for context retrieval
+            enhanced_doc_id = self._generate_document_id(filename, full_content, doc_id)  # Store this!
+            
+            # Upload original document to blob storage
             original_blob_url = self._upload_original_document(full_content, filename, enhanced_doc_id)
             logger.info(f"Uploaded original document to blob: {original_blob_url}")
-
+            
             # Create enhanced chunks with detailed metadata
             chunked_docs = []
             global_chunk_index = 0
-
+            
             for doc in documents:
                 page_content = doc.page_content
                 page = doc.metadata.get("page")
-
+                
                 page_chunks, global_chunk_index = self._create_enhanced_chunks_with_metadata(
                     page_content,
                     filename,
-                    enhanced_doc_id,
+                    enhanced_doc_id,  # Use enhanced ID here
                     space_id,
                     original_blob_url,
                     file_type,
                     start_index=global_chunk_index
                 )
-
+                
                 # Add page and parser info to each chunk
                 for c in page_chunks:
                     c.metadata["page"] = page
                     c.metadata["parser"] = doc.metadata.get("parser")
-
+                
                 chunked_docs.extend(page_chunks)
-
+            
             metadata.chunk_count = len(chunked_docs)
             logger.info(f"Split document into {len(chunked_docs)} enhanced chunks")
-
-            # Initialize or add to vector store - FIXED: added verification
+            
+            # Initialize or add to vector store
             try:
                 if self.vector_store is None:
                     self.vector_store = PineconeVectorStore.from_documents(
@@ -281,19 +289,20 @@ class RAGPipeline:
                 else:
                     ids = self.vector_store.add_documents(chunked_docs)
                     logger.info(f"Successfully stored {len(ids)} embeddings in Pinecone")
-
+                    
                     # Verify embeddings were created
                     if len(ids) != len(chunked_docs):
                         raise ValueError(f"Mismatch: {len(chunked_docs)} chunks but only {len(ids)} embeddings stored")
-
             except Exception as e:
                 logger.error(f"Failed to create embeddings or store in Pinecone: {e}")
                 raise
-
+            
             metadata.status = "completed"
             logger.info(f"Successfully processed document {doc_id} with enhancements")
-            return metadata, chunked_docs, self.embedding_model
-
+            
+            # RETURN ENHANCED DOC ID TOO!
+            return metadata, chunked_docs, self.embedding_model, enhanced_doc_id
+            
         except Exception as e:
             metadata.status = "failed"
             logger.error(f"Error processing document {doc_id}: {str(e)}", exc_info=True)
@@ -302,6 +311,8 @@ class RAGPipeline:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
                 logger.debug(f"Cleaned up temporary file: {file_path}")
+
+
 
     def delete_vectors_by_metadata(self, filter_dict: dict):
         """

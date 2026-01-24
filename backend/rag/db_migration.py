@@ -15,3 +15,4 @@ try:
     db.close()
 except Exception as e:
     print(e)
+

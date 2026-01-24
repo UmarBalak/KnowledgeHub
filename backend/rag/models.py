@@ -78,6 +78,8 @@ class Document(Base):
     source_name = Column(String(50), nullable=True)  # e.g., "User Upload", "Semantic Scholar"
     display_mode = Column(Enum(DisplayModeEnum), default=DisplayModeEnum.generated_answer)
 
+    vector_doc_id = Column(String(200), nullable=True, index=True)
+    
     # Relationships
     space = relationship("Space", back_populates="documents")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
