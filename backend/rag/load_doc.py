@@ -16,6 +16,7 @@ load_dotenv()
 def parse_pdf_unstructured(file_path: str) -> List[Document]:
     """
     Medium accuracy.
+    Too slow on CPU. Not using this in the RAG pipeline.
     RAG-OPTIMIZED: Uses 'by_title' to detect structure, but MERGES results
     so the pipeline handles character offsets correctly.
     """
@@ -118,28 +119,28 @@ def parse_pdf4llm(file_path: str) -> List[Document]:
     logger.info(f"Parsed document with pdf4llm")
     return doc
 
-def load_document(file_path: str, file_type: str, mode: str = "auto") -> List[Document]:
+def load_document(file_path: str, file_type: str, mode: str = "fast") -> List[Document]:
     """
     Helper method to load document based on file type and parsing mode.
 
     Args:
         file_path: Path to the document file
         file_type: Type of file ('pdf' or 'txt')
-        mode: Parsing mode ('auto', 'llama', 'unstructured', 'balanced', 'fast')
+        mode: Parsing mode ('fast', 'accurate', 'balanced')
 
     Returns:
         List of Document objects with page_content and metadata
     """
     if file_type == "pdf":
-        if mode == "llama":
+        if mode == "accurate":
             logger.info(f"Loading PDF with llama parser: {file_path}")
             return llama_parser(file_path)
 
-        elif mode == "unstructured":
-            logger.info(f"Loading PDF with unstructured parser: {file_path}")
-            return parse_pdf_unstructured(file_path)
+        # elif mode == "unstructured":
+        #     logger.info(f"Loading PDF with unstructured parser: {file_path}")
+        #     return parse_pdf_unstructured(file_path)
 
-        elif mode == "pdf4llm":
+        elif mode == "balanced":
             logger.info(f"Loading PDF with pdf4llm (balanced): {file_path}")
             return parse_pdf4llm(file_path)
 

@@ -160,7 +160,7 @@ def require_maintainer(user: UserContext):
         raise HTTPException(status_code=403, detail="Insufficient privileges")
 
 
-def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "auto"):
+def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "fast"):
     """
     Background processing task that stores the enhanced document ID
     """
@@ -425,7 +425,7 @@ async def upload_document(
     space_id: int = Path(...),
     file: UploadFile = File(...),
     title: str = Form(...),
-    parse_mode: str = Form("auto"),
+    parse_mode: str = Form("fast"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -438,7 +438,7 @@ async def upload_document(
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
-    ALLOWED_PARSE_MODES = {"auto", "unstructured", "pdf4llm", "llama", "fast", "balanced"}
+    ALLOWED_PARSE_MODES = {"fast", "accurate", "balanced"}
     if parse_mode not in ALLOWED_PARSE_MODES:
         raise HTTPException(
             status_code=400,
