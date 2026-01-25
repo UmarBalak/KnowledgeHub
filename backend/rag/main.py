@@ -507,9 +507,23 @@ async def add_user_to_cohort(
 
 
 @app.get("/all-spaces", response_model=List[SpaceOut])
-async def list_all_spaces(db: Session = Depends(get_db)):
-    # Debug / ops only; not scoped.
-    spaces = db.query(Space).all()
+async def list_all_spaces(
+    user: UserContext = Depends(get_current_user),
+    cohort_id: int = Depends(get_current_cohort),  # <--- INJECT COHORT CONTEXT
+    db: Session = Depends(get_db),
+):
+    """
+    Returns all public spaces within the active cohort.
+    Used for the "Discover" UI.
+    """
+    spaces = (
+        db.query(Space)
+        .filter(
+            Space.cohort_id == cohort_id,  # <--- SCOPE BY COHORT
+            Space.is_public.is_(True)      # <--- OPTIONAL: Only show public spaces
+        )
+        .all()
+    )
     return spaces
 
 
