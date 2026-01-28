@@ -46,10 +46,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["Set-Cookie"],
 )
+
 
 # ---------- Utils ----------
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=24)):
@@ -242,11 +243,13 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
                 key="auth_token",
                 value=jwt_token,
                 httponly=True,
-                secure=True,          # required for HTTPS
-                samesite="none",      # required for cross-site cookies
-                max_age=86400,
+                secure=True,
+                samesite="none",
                 path="/",
+                domain=".onrender.com",
+                max_age=86400,
             )
+
             return resp
             
         except Exception as e:
