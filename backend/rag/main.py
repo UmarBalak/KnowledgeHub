@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Que
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import BackgroundTasks
-from fastapi import WebSocket, WebSocketDisconnect, Cookie, status, Query
+from fastapi import WebSocket, WebSocketDisconnect, Cookie, status, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from starlette.responses import Response
@@ -279,7 +279,19 @@ async def health_check():
 async def health_check_monitor():
     return Response(status_code=200)
 
-# --- CHAT WEBSOCKET ENDPOINT (NEW) ---
+@app.get("/auth/token")
+async def get_websocket_token(auth_token: Optional[str] = Cookie(None)):
+    """
+    Helper endpoint to retrieve the token for WebSocket connections.
+    Since WebSockets often struggle with Cookies (especially Secure ones on localhost),
+    we fetch the token via HTTP first and pass it as a query param.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="No auth cookie found")
+    return {"token": auth_token}
+
+
+# --- CHAT WEBSOCKET ENDPOINT ---
 @app.websocket("/spaces/{space_id}/ws")
 async def chat_endpoint(
     websocket: WebSocket, 
@@ -355,7 +367,8 @@ async def chat_endpoint(
     except Exception as e:
         logging.error(f"WebSocket error: {e}")
         chat_manager.disconnect(websocket, space_id)
-# --- CHAT HISTORY ENDPOINT (NEW) ---
+
+# --- CHAT HISTORY ENDPOINT ---
 @app.get("/spaces/{space_id}/messages", response_model=List[ChatMessageOut])
 async def get_chat_history(
     space_id: int,
