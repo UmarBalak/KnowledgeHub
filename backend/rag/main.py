@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Que
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import BackgroundTasks
+from fastapi import WebSocket, WebSocketDisconnect, Cookie, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from starlette.responses import Response
@@ -284,49 +285,52 @@ async def chat_endpoint(
     websocket: WebSocket, 
     space_id: int, 
     db: Session = Depends(get_db),
-    auth_token: Optional[str] = Cookie(None)
+    auth_token: Optional[str] = Cookie(None),
+    token: Optional[str] = Query(None) # Added fallback
 ):
     """
     Real-time encrypted chat WebSocket.
-    Authenticates via HTTP Cookie (auth_token).
     """
+    # Prefer Cookie, fallback to Query Param (useful for testing)
+    final_token = auth_token or token
+    
+    if not final_token:
+        logging.warning(f"WS Rejected: No auth_token found for Space {space_id}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="No Token")
+        return
+
     user_ctx = None
-    
-    # 1. Authenticate (Decode JWT manually since WS doesn't support HTTPBearer middleware easily)
-    if auth_token:
-        try:
-            payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_ctx = UserContext(
-                google_id=payload.get("sub"), 
-                name=payload.get("name"), 
-                role=payload.get("role")
-            )
-        except jwt.ExpiredSignatureError:
-            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Token Expired")
-            return
-        except jwt.PyJWTError:
-            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Invalid Token")
-            return
-    
-    if not user_ctx:
-        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Not Authenticated")
+    try:
+        # Decode JWT
+        payload = jwt.decode(final_token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_ctx = UserContext(
+            google_id=payload.get("sub"), 
+            name=payload.get("name"), 
+            role=payload.get("role")
+        )
+    except jwt.ExpiredSignatureError:
+        logging.warning("WS Rejected: Token Expired")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Token Expired")
         return
-
-    # 2. Authorization (Check Membership)
+    except jwt.PyJWTError as e:
+        logging.warning(f"WS Rejected: Invalid Token - {e}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid Token")
+        return
+    
+    # Check Membership
     if not is_user_member(db, user_ctx.google_id, space_id):
-        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Not a member")
+        logging.warning(f"WS Rejected: User {user_ctx.google_id} not member of {space_id}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Not a member")
         return
 
-    # 3. Connect
+    # Connect
     await chat_manager.connect(websocket, space_id)
     
     try:
         while True:
-            # Wait for message
             data = await websocket.receive_text()
             
-            # Save to DB (Encrypts automatically via TypeDecorator)
-            # Note: Using sync DB calls here. For extremely high throughput, wrap in run_in_threadpool
+            # Save to DB
             new_msg = ChatMessage(
                 space_id=space_id,
                 user_id=user_ctx.google_id,
@@ -336,12 +340,12 @@ async def chat_endpoint(
             db.commit()
             db.refresh(new_msg)
 
-            # Broadcast to room
+            # Broadcast
             response_payload = {
                 "id": new_msg.id,
                 "user_id": user_ctx.google_id,
                 "user_name": user_ctx.name,
-                "content": data, # Send plain text back to clients
+                "content": data,
                 "created_at": str(new_msg.created_at)
             }
             await chat_manager.broadcast(response_payload, space_id)
@@ -351,7 +355,6 @@ async def chat_endpoint(
     except Exception as e:
         logging.error(f"WebSocket error: {e}")
         chat_manager.disconnect(websocket, space_id)
-
 # --- CHAT HISTORY ENDPOINT (NEW) ---
 @app.get("/spaces/{space_id}/messages", response_model=List[ChatMessageOut])
 async def get_chat_history(
