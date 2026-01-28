@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from database import Base, engine, SessionLocal
 from models import Space
 

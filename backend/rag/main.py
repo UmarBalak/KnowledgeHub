@@ -1,13 +1,12 @@
 from ast import Dict
-
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Path, Cookie, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Query, Path, Cookie, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from starlette.responses import Response
-from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.status import HTTP_401_UNAUTHORIZED, WS_1008_POLICY_VIOLATION
 import hashlib
 from typing import List, Optional, Any, Dict
 import logging
@@ -19,8 +18,9 @@ import os
 from datetime import datetime
 from starlette.responses import JSONResponse, Response
 
+# Imports from your project structure
 from database import get_db, Base, engine, SessionLocal
-from models import Space, SpaceMembership, Document, DocumentChunk, QueryLog, SpaceRoleEnum, DisplayModeEnum
+from models import Space, SpaceMembership, Document, DocumentChunk, QueryLog, ChatMessage, SpaceRoleEnum, DisplayModeEnum
 from ragPipeline import RAGPipeline
 from blobStorage import upload_blob, delete_blob, extract_filename_from_url
 from pydantic import BaseModel, Field
@@ -28,13 +28,44 @@ from pydantic import BaseModel, Field
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
+# --- Connection Manager for Chat ---
+class ConnectionManager:
+    def __init__(self):
+        # Maps space_id -> List of WebSocket connections
+        self.active_connections: Dict[int, List[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, space_id: int):
+        await websocket.accept()
+        if space_id not in self.active_connections:
+            self.active_connections[space_id] = []
+        self.active_connections[space_id].append(websocket)
+        logging.info(f"WebSocket connected to Space {space_id}. Total: {len(self.active_connections[space_id])}")
+
+    def disconnect(self, websocket: WebSocket, space_id: int):
+        if space_id in self.active_connections:
+            if websocket in self.active_connections[space_id]:
+                self.active_connections[space_id].remove(websocket)
+            if not self.active_connections[space_id]:
+                del self.active_connections[space_id]
+        logging.info(f"WebSocket disconnected from Space {space_id}")
+
+    async def broadcast(self, message: dict, space_id: int):
+        if space_id in self.active_connections:
+            for connection in self.active_connections[space_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception as e:
+                    logging.warning(f"Failed to send message to client: {e}")
+
+chat_manager = ConnectionManager()
+
+# --- Main App Setup ---
+
 def generate_query_hash(query_text: str, space_id: int) -> str:
     """Generate deterministic SHA-256 hash of normalized query"""
-    # Normalize: lowercase, strip whitespace, remove extra spaces
     normalized = " ".join(query_text.lower().strip().split())
     content = f"{normalized}:{space_id}"
     return hashlib.sha256(content.encode()).hexdigest()
-
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -56,10 +87,9 @@ app.add_middleware(
     expose_headers=["Set-Cookie"],
 )
 
-security = HTTPBearer()
 rag_pipeline = RAGPipeline(index_name=os.getenv("PINECONE_INDEX_NAME"))
 
-# Pydantic response/request models
+# --- Pydantic Models ---
 class SpaceStats(BaseModel):
     total_docs: int
     user_docs: int
@@ -131,6 +161,16 @@ class DocumentResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ChatMessageOut(BaseModel):
+    id: int
+    space_id: int
+    user_id: str
+    content: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
 user_llm_cache = {}
 
 def get_user_llm(user_id):
@@ -139,7 +179,9 @@ def get_user_llm(user_id):
         user_llm_cache[user_id] = LLM(gpt5=True)
     return user_llm_cache[user_id]
 
-# Dependency to extract user info from headers (set by frontend AuthContext)
+# --- Dependencies ---
+
+# Dependency to extract user info from headers (set by frontend AuthContext for REST APIs)
 def get_current_user(request: Request) -> UserContext:
     user_id = request.headers.get("X-User-Id")
     role = request.headers.get("X-User-Role", "member")
@@ -158,7 +200,6 @@ def is_user_member(db: Session, user_id: str, space_id: int) -> bool:
 def require_maintainer(user: UserContext):
     if user.role != "maintainer":
         raise HTTPException(status_code=403, detail="Insufficient privileges")
-
 
 def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "fast"):
     """
@@ -223,6 +264,7 @@ def process_document_background(doc_id: int, space_id: int, file_type: str, pars
         db.close()
 
 
+# --- Endpoints ---
 
 @app.get("/", response_model=dict)
 async def root():
@@ -235,6 +277,101 @@ async def health_check():
 @app.head("/health")
 async def health_check_monitor():
     return Response(status_code=200)
+
+# --- CHAT WEBSOCKET ENDPOINT (NEW) ---
+@app.websocket("/spaces/{space_id}/ws")
+async def chat_endpoint(
+    websocket: WebSocket, 
+    space_id: int, 
+    db: Session = Depends(get_db),
+    auth_token: Optional[str] = Cookie(None)
+):
+    """
+    Real-time encrypted chat WebSocket.
+    Authenticates via HTTP Cookie (auth_token).
+    """
+    user_ctx = None
+    
+    # 1. Authenticate (Decode JWT manually since WS doesn't support HTTPBearer middleware easily)
+    if auth_token:
+        try:
+            payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
+            user_ctx = UserContext(
+                google_id=payload.get("sub"), 
+                name=payload.get("name"), 
+                role=payload.get("role")
+            )
+        except jwt.ExpiredSignatureError:
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Token Expired")
+            return
+        except jwt.PyJWTError:
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Invalid Token")
+            return
+    
+    if not user_ctx:
+        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Not Authenticated")
+        return
+
+    # 2. Authorization (Check Membership)
+    if not is_user_member(db, user_ctx.google_id, space_id):
+        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Not a member")
+        return
+
+    # 3. Connect
+    await chat_manager.connect(websocket, space_id)
+    
+    try:
+        while True:
+            # Wait for message
+            data = await websocket.receive_text()
+            
+            # Save to DB (Encrypts automatically via TypeDecorator)
+            # Note: Using sync DB calls here. For extremely high throughput, wrap in run_in_threadpool
+            new_msg = ChatMessage(
+                space_id=space_id,
+                user_id=user_ctx.google_id,
+                content=data
+            )
+            db.add(new_msg)
+            db.commit()
+            db.refresh(new_msg)
+
+            # Broadcast to room
+            response_payload = {
+                "id": new_msg.id,
+                "user_id": user_ctx.google_id,
+                "user_name": user_ctx.name,
+                "content": data, # Send plain text back to clients
+                "created_at": str(new_msg.created_at)
+            }
+            await chat_manager.broadcast(response_payload, space_id)
+            
+    except WebSocketDisconnect:
+        chat_manager.disconnect(websocket, space_id)
+    except Exception as e:
+        logging.error(f"WebSocket error: {e}")
+        chat_manager.disconnect(websocket, space_id)
+
+# --- CHAT HISTORY ENDPOINT (NEW) ---
+@app.get("/spaces/{space_id}/messages", response_model=List[ChatMessageOut])
+async def get_chat_history(
+    space_id: int,
+    limit: int = 50,
+    skip: int = 0,
+    userContext=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not is_user_member(db, userContext.google_id, space_id):
+        raise HTTPException(status_code=403, detail="Not a space member")
+    
+    # Fetch latest messages
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.space_id == space_id
+    ).order_by(desc(ChatMessage.created_at)).offset(skip).limit(limit).all()
+    
+    # Return reversed list (so frontend gets oldest -> newest for scrolling)
+    return messages[::-1]
+
 
 @app.get("/all-spaces", response_model=List[SpaceOut])
 async def list_all_spaces(db: Session = Depends(get_db)):
@@ -482,8 +619,6 @@ async def upload_document(
     )
 
     # 5. Return immediately!
-    # The browser receives this response in ~1-2 seconds.
-    # The background task continues running on the server.
     return DocumentResponse.model_validate(document)
 
 @app.get("/spaces/{space_id}/documents", response_model=List[DocumentResponse])

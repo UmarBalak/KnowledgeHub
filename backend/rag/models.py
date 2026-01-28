@@ -10,20 +10,52 @@ from sqlalchemy import (
     Float,
     func,
     JSON,
+    TypeDecorator
 )
 from sqlalchemy.orm import relationship
 import enum
+import os
+from cryptography.fernet import Fernet
 from database import Base  # imports your SQLAlchemy Base
+
+# --- Encryption Setup ---
+# Loads key from environment. If missing, it defaults to None (Encryption won't work without it)
+CHAT_ENCRYPTION_KEY = os.getenv("CHAT_ENCRYPTION_KEY")
+cipher_suite = Fernet(CHAT_ENCRYPTION_KEY) if CHAT_ENCRYPTION_KEY else None
+
+class EncryptedString(TypeDecorator):
+    """
+    SQLAlchemy Type that encrypts data on the way IN to the DB 
+    and decrypts it on the way OUT.
+    """
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if not value:
+            return value
+        if not cipher_suite:
+            raise ValueError("CHAT_ENCRYPTION_KEY is missing in environment variables!")
+        return cipher_suite.encrypt(value.encode('utf-8')).decode('utf-8')
+
+    def process_result_value(self, value, dialect):
+        if not value:
+            return value
+        if not cipher_suite:
+            return value
+        return cipher_suite.decrypt(value.encode('utf-8')).decode('utf-8')
+
+# --- Enums ---
 
 class SpaceRoleEnum(str, enum.Enum):
     admin = "admin"
     member = "member"
 
-
 class DisplayModeEnum(str, enum.Enum):
     raw_content = "raw_content"
     generated_answer = "generated_answer"
 
+# --- Models ---
 
 class Space(Base):
     __tablename__ = "spaces"
@@ -42,6 +74,12 @@ class Space(Base):
     )
     memberships = relationship(
         "SpaceMembership",
+        back_populates="space",
+        cascade="all, delete-orphan"
+    )
+    # New Chat Relationship
+    chat_messages = relationship(
+        "ChatMessage",
         back_populates="space",
         cascade="all, delete-orphan"
     )
@@ -97,7 +135,7 @@ class DocumentChunk(Base):
 
     # Relationships
     document = relationship("Document", back_populates="chunks")
-    
+
 class QueryLog(Base):
     __tablename__ = "query_logs"
     
@@ -113,3 +151,17 @@ class QueryLog(Base):
     space_id = Column(Integer, nullable=False, index=True)  # Important for filtering
     hit_count = Column(Integer, default=1)  # Track cache reuse
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+# --- NEW CHAT MODEL ---
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=False, index=True)
+    user_id = Column(String(36), nullable=False, index=True) # UUID from Auth
+    # This content is encrypted in the DB, but accessible as plain string in Python
+    content = Column(EncryptedString, nullable=False) 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    space = relationship("Space", back_populates="chat_messages")
