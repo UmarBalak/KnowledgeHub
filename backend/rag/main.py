@@ -20,6 +20,7 @@ from datetime import timedelta
 import os
 from datetime import datetime
 from starlette.responses import JSONResponse, Response
+import httpx
 
 # Imports from your project structure
 from database import get_db, Base, engine, SessionLocal
@@ -78,6 +79,7 @@ app = FastAPI()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 FRONTEND_URL = os.getenv("FRONTEND_URL")
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL")
 
 security = HTTPBearer()
 
@@ -168,6 +170,7 @@ class ChatMessageOut(BaseModel):
     id: int
     space_id: int
     user_id: str
+    user_name: str
     content: str
     created_at: datetime
     
@@ -386,18 +389,47 @@ async def get_chat_history(
     limit: int = 50,
     skip: int = 0,
     userContext=Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     if not is_user_member(db, userContext.google_id, space_id):
         raise HTTPException(status_code=403, detail="Not a space member")
-    
-    # Fetch latest messages
-    messages = db.query(ChatMessage).filter(
-        ChatMessage.space_id == space_id
-    ).order_by(desc(ChatMessage.created_at)).offset(skip).limit(limit).all()
-    
-    # Return reversed list (so frontend gets oldest -> newest for scrolling)
-    return messages[::-1]
+
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.space_id == space_id)
+        .order_by(desc(ChatMessage.created_at))
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )[::-1]
+
+    if not messages:
+        return []
+
+    user_ids = list({m.user_id for m in messages})
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.post(
+                f"{AUTH_SERVICE_URL}/internal/users/resolve",
+                json=user_ids,
+            )
+        user_map = resp.json() if resp.status_code == 200 else {}
+    except Exception:
+        user_map = {}
+
+    return [
+        ChatMessageOut(
+            id=m.id,
+            space_id=m.space_id,
+            user_id=m.user_id,
+            user_name=user_map.get(m.user_id, "User"),
+            content=m.content,
+            created_at=m.created_at,
+        )
+        for m in messages
+    ]
+
 
 
 @app.get("/all-spaces", response_model=List[SpaceOut])

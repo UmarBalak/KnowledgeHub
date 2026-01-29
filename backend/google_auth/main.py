@@ -326,3 +326,13 @@ async def logout(response: Response):
     )
     logging.info("User logged out, auth_token cookie deleted")
     return {"message": "Logged out successfully"}
+
+# ---------- Team Chat Names ----------
+@app.post("/internal/users/resolve")
+def resolve_users(user_ids: list[str], db: Session = Depends(get_db)):
+    users = (
+        db.query(User.google_id, User.name)
+        .filter(User.google_id.in_(user_ids))
+        .all()
+    )
+    return {u.google_id: u.name for u in users}
