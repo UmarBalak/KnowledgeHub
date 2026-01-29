@@ -88,6 +88,33 @@ async def db_health_check_head(db: Session = Depends(get_db)):
     except Exception as e:
         return Response(status_code=503)
 
+# ---------- WS Token Endpoint ----------
+@app.get("/auth/ws-token")
+def issue_ws_token(auth_token: str = Cookie(None)):
+    """
+    Uses HttpOnly auth_token cookie to mint a short-lived WS token.
+    """
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
+
+        ws_token = create_access_token(
+            {
+                "sub": payload.get("sub"),
+                "name": payload.get("name"),
+                "role": payload.get("role"),
+                "scope": "ws",
+            },
+            expires_delta=timedelta(minutes=5),
+        )
+
+        return {"token": ws_token}
+
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+        
 # ---------- OAuth ----------
 @app.get("/auth/google/guestlogin")
 def guestlogin():
