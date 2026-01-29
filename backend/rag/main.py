@@ -52,7 +52,7 @@ class ConnectionManager:
                 del self.active_connections[space_id]
         logging.info(f"WebSocket disconnected from Space {space_id}")
 
-    async def broadcast(self, message: dict, space_id: int):
+    async def broadcast(self, space_id: int, message: dict):
         if space_id in self.active_connections:
             for connection in self.active_connections[space_id]:
                 try:
