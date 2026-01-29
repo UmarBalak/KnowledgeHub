@@ -298,7 +298,8 @@ async def chat_endpoint(
     are not sent with the WS handshake.
     """
     # Prefer cookie, fall back to query parameter
-    auth = auth_token or token
+    # auth = auth_token or token
+    auth = auth_token
 
     if not auth:
         logging.warning(f"WS Rejected: No auth token. Space: {space_id}")
