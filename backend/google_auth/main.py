@@ -273,7 +273,7 @@ async def guestcallback(code: str = None, error: str = None, db: Session = Depen
                 secure=True,
                 samesite="none",
                 path="/",
-                domain=".onrender.com",
+                # domain=".onrender.com",
                 max_age=86400,
             )
 
