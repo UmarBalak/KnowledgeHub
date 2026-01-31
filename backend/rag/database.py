@@ -17,7 +17,10 @@ DBNAME = os.getenv("dbname")
 DATABASE_URL = f"postgresql+psycopg2://{USER}:{PASSWORD}@{HOST}:{PORT}/{DBNAME}?sslmode=require"
 
 # Create the SQLAlchemy engine
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL, 
+    pool_pre_ping=True
+)
 
 # Test the connection
 try:
@@ -33,7 +36,7 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
-        db.commit()
+        # db.commit()
     except:
         db.rollback()
         raise

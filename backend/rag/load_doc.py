@@ -13,45 +13,6 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-def parse_pdf_unstructured(file_path: str) -> List[Document]:
-    """
-    Medium accuracy.
-    Too slow on CPU. Not using this in the RAG pipeline.
-    RAG-OPTIMIZED: Uses 'by_title' to detect structure, but MERGES results
-    so the pipeline handles character offsets correctly.
-    """
-    logger.info("Using unstructured parser")
-    loader = UnstructuredPDFLoader(
-        file_path,
-        mode="elements",
-        strategy="fast", 
-        chunking_strategy="by_title",    
-        max_characters=4000,
-        new_after_n_chars=3800,
-        combine_text_under_n_chars=2000,
-    )
-    
-    # 1. Get semantically chunked elements
-    raw_docs = loader.load()
-
-    # 2. MERGE into one continuous text block
-    # This ensures your pipeline's TextSplitter calculates global 
-    # start_char/end_char offsets correctly relative to the file start.
-    full_text = "\n\n".join([doc.page_content for doc in raw_docs])
-
-    # 3. Return as single document
-    doc = [
-        Document(
-            page_content=full_text,
-            metadata={
-                "source": file_path,
-                "parser": "unstructured",
-            }
-        )
-    ]
-
-    return doc
-
 def llama_parser(file_path: str) -> List[Document]:
     """
     Most accurate but slower and uses external API.
@@ -119,14 +80,14 @@ def parse_pdf4llm(file_path: str) -> List[Document]:
     logger.info(f"Parsed document with pdf4llm")
     return doc
 
-def load_document(file_path: str, file_type: str, mode: str = "fast") -> List[Document]:
+def load_document(file_path: str, file_type: str, mode: str = "balanced") -> List[Document]:
     """
     Helper method to load document based on file type and parsing mode.
 
     Args:
         file_path: Path to the document file
         file_type: Type of file ('pdf' or 'txt')
-        mode: Parsing mode ('fast', 'accurate', 'balanced')
+        mode: Parsing mode ('accurate', 'balanced')
 
     Returns:
         List of Document objects with page_content and metadata
@@ -136,31 +97,27 @@ def load_document(file_path: str, file_type: str, mode: str = "fast") -> List[Do
             logger.info(f"Loading PDF with llama parser: {file_path}")
             return llama_parser(file_path)
 
-        # elif mode == "unstructured":
-        #     logger.info(f"Loading PDF with unstructured parser: {file_path}")
-        #     return parse_pdf_unstructured(file_path)
-
         elif mode == "balanced":
             logger.info(f"Loading PDF with pdf4llm (balanced): {file_path}")
             return parse_pdf4llm(file_path)
 
-        elif mode == "fast":
-            logger.info(f"Loading PDF with PyMuPDFLoader (fast): {file_path}")
-            # PyMuPDF (Fast, Lower Quality)
-            raw_docs = PyMuPDFLoader(file_path).load()
+        # elif mode == "fast":
+        #     logger.info(f"Loading PDF with PyMuPDFLoader (fast): {file_path}")
+        #     # PyMuPDF (Fast, Lower Quality)
+        #     raw_docs = PyMuPDFLoader(file_path).load()
 
-            merged_text = "\n\n".join([d.page_content for d in raw_docs])
+        #     merged_text = "\n\n".join([d.page_content for d in raw_docs])
             
-            doc = [
-                Document(
-                    page_content=merged_text, 
-                    metadata={
-                        "source": file_path, 
-                        "parser": "pymupdf_fast",
-                    }
-                )
-            ] 
-            return doc
+        #     doc = [
+        #         Document(
+        #             page_content=merged_text, 
+        #             metadata={
+        #                 "source": file_path, 
+        #                 "parser": "pymupdf_fast",
+        #             }
+        #         )
+        #     ] 
+        #     return doc
 
         else:
             raise ValueError(f"Unknown parse mode for PDF: {mode}")

@@ -218,7 +218,7 @@ class RAGPipeline:
         file_type: str, 
         doc_id: str, 
         space_id: int, 
-        parse_mode: str = "fast"
+        parse_mode: str = "balanced"
     ) -> Tuple[DocumentMetadata, List[Document], str, str]:  # Added str for enhanced_doc_id
         """
         Enhanced document processing with detailed chunk tracking.

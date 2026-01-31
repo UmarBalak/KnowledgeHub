@@ -207,7 +207,7 @@ def require_maintainer(user: UserContext):
     if user.role != "maintainer":
         raise HTTPException(status_code=403, detail="Insufficient privileges")
 
-def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "fast"):
+def process_document_background(doc_id: int, space_id: int, file_type: str, parse_mode: str = "balanced"):
     """
     Background processing task that stores the enhanced document ID
     """
@@ -621,7 +621,7 @@ async def upload_document(
     space_id: int = Path(...),
     file: UploadFile = File(...),
     title: str = Form(...),
-    parse_mode: str = Form("fast"),
+    parse_mode: str = Form("balanced"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     userContext=Depends(get_current_user),
     db: Session = Depends(get_db)

@@ -183,7 +183,6 @@ This section describes the **full backend execution path** for all major operati
 
 | Mode | Description |
 |----|------------|
-| fast | Fast parsing, lower accuracy |
 | balanced | Balanced speed and accuracy |
 | accurate | LlamaParser (external API, highest accuracy) |
 
