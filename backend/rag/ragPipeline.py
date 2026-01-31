@@ -4,7 +4,7 @@ import hashlib
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, asdict
 from numpy import spacing
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain.prompts.chat import (
     ChatPromptTemplate,
@@ -64,7 +64,7 @@ class RAGPipeline:
     4. Original document storage in Azure Blob Storage
     """
 
-    def __init__(self, index_name: str, llm_gpt5: bool = True, chunk_size: int = 512, chunk_overlap: int = 64):
+    def __init__(self, index_name: str, llm_gpt5: bool = True, chunk_size: int = 1200, chunk_overlap: int = 150):
         self.index_name = index_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -85,17 +85,53 @@ class RAGPipeline:
         self.llm = LLM(gpt5=llm_gpt5, max_messages=10)
 
         # Enhanced text splitter
-        self.text_splitter = CharacterTextSplitter(
+        self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             length_function=len,
-            separator=" "
+            separators=[
+                "\n## ",   # markdown sections (very important for PDFs)
+                "\n# ",
+                "\n\n",    # paragraph boundaries
+                "\n",      # line breaks
+                ". ",      # sentences
+                " ",       # fallback
+                ""
+            ],
         )
+
 
         # Create index and initialize vector store
         self.create_index(self.index_name)
         self._initialize_vector_store()
         logger.info(f"Initialized Enhanced RAGPipeline with index: {index_name}")
+
+    def _split_into_semantic_blocks(self, text: str) -> List[str]:
+        """
+        Split text into semantic blocks using markdown-style structure.
+        Works for both PDF-parsed markdown and raw text.
+        """
+        blocks = []
+        current = []
+
+        for line in text.splitlines():
+            # New semantic block on markdown headers
+            if line.startswith("#"):
+                if current:
+                    blocks.append("\n".join(current).strip())
+                    current = []
+            current.append(line)
+
+        if current:
+            blocks.append("\n".join(current).strip())
+
+        # Fallback: if no headers found, treat entire doc as one block
+        if len(blocks) == 1:
+            return blocks
+
+        # Remove very small blocks
+        return [b for b in blocks if len(b) > 50]
+
 
     def _initialize_vector_store(self):
         """Initialize connection to existing Pinecone vector store"""
@@ -254,23 +290,32 @@ class RAGPipeline:
             global_chunk_index = 0
             
             for doc in documents:
-                page_content = doc.page_content
-                
-                page_chunks, global_chunk_index = self._create_enhanced_chunks_with_metadata(
-                    page_content,
-                    filename,
-                    enhanced_doc_id,  # Use enhanced ID here
-                    space_id,
-                    original_blob_url,
-                    file_type,
-                    start_index=global_chunk_index
-                )
-                
-                # Add page and parser info to each chunk
-                for c in page_chunks:
-                    c.metadata["parser"] = doc.metadata.get("parser")
-                
-                chunked_docs.extend(page_chunks)
+                semantic_blocks = self._split_into_semantic_blocks(doc.page_content)
+
+                for block in semantic_blocks:
+                    # If block is small enough, keep it intact
+                    if len(block) <= 2500:
+                        blocks_to_split = [block]
+                    else:
+                        # Only now apply recursive splitting
+                        blocks_to_split = self.text_splitter.split_text(block)
+
+                    for split_block in blocks_to_split:
+                        page_chunks, global_chunk_index = self._create_enhanced_chunks_with_metadata(
+                            split_block,
+                            filename,
+                            enhanced_doc_id,
+                            space_id,
+                            original_blob_url,
+                            file_type,
+                            start_index=global_chunk_index
+                        )
+
+                        for c in page_chunks:
+                            c.metadata["parser"] = doc.metadata.get("parser")
+
+                        chunked_docs.extend(page_chunks)
+
             
             metadata.chunk_count = len(chunked_docs)
             logger.info(f"Split document into {len(chunked_docs)} enhanced chunks")
