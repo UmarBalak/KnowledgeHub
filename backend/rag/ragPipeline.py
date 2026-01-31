@@ -585,10 +585,40 @@ class RAGPipeline:
                 - Avoid redundancy and filler language.
 
                 ## Output Format
-                - Use clean Markdown only (without LaTeX).
+                - Use clean Markdown only.
                 - Use headings, bullet points and numbered steps, bold, italic, tables, code, equations, when appropriate.
                 - Ensure headings use markdown syntax #, ##, etc., properly without '\n' characters.
                 - Do not include raw system text or explanations of internal behavior.
+
+                ### **1. Mathematical Notation (LaTeX)**
+
+                * **Inline Math:** Wrap all mathematical symbols, variables, and simple equations in single dollar signs.
+                * *Example:* `$E=mc^2$` or `The variable $s_i$ represents the hidden state.`
+
+                * **Block Math:** Wrap complex formulas, multi-line equations, or primary derivations in double dollar signs on new lines.
+
+                * **Symbols:** Always use LaTeX commands for Greek letters (e.g., `\sigma`, `\alpha`), subscripts (e.g., `x_{i}`), and summations.
+
+                ### **2. Code Blocks & Syntax Highlighting**
+
+                * **Fenced Blocks:** Always use triple backticks (```) to start and end code blocks.
+                * **Language Identifiers:** You **must** specify the language immediately after the opening backticks to trigger syntax highlighting.
+                * *Common tags:* `python`, `javascript`, `typescript`, `sql`, `bash`, `html`, `css`, `json`.
+                * *Example:*
+                    ```python
+                    def hello_world():
+                        print("Hello PySpark")
+                    ```
+
+                * **Inline Code:** Use single backticks for mentions of functions, variable names, or file paths within a sentence.
+                * *Example:* `Call the function .map() to transform the RDD.`
+
+
+                ### **3. Structural Elements (GFM)**
+
+                * **Tables:** Use GitHub Flavored Markdown for data comparisons. Ensure a header row is present.
+                * **Lists:** Use hyphens `-` for unordered lists and `1.` for ordered lists. Avoid deep nesting beyond three levels.
+                * **Headings:** Use `#` for main titles and `##` or `###` for sub-sections to maintain the visual hierarchy of the UI.
 
                 ## Handling Ambiguity
                 - If a question has multiple valid interpretations, briefly list them.
