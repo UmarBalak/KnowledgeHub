@@ -85,7 +85,7 @@ class LLM:
                 deployment_name="gpt-5-mini",
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
-            logging.info("Gpt5 LLM initialized.")
+            logging.info("Gpt5-mini LLM initialized.")
             response = llm.invoke(prompt, stop=stop)
             logging.info(f"LLM response: {response}")
             return response
@@ -100,6 +100,7 @@ class LLM:
                 model=self.model_name,
                 temperature=0.1,
             )
+            logging.info("TogetherAI LLM initialized.")
             response = llm_model.invoke(prompt, stop=stop)
             return response
         except RequestException as e:

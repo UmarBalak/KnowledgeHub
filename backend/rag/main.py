@@ -474,7 +474,7 @@ async def query_space_documents(
             query_text=query_request.query,
             space_id=space_id,
             db=db,
-            similarity_threshold=0.95  # Adjust: 0.90-0.98 recommended
+            similarity_threshold=0.90  # Adjust: 0.90-0.98 recommended
         )
         
         if cached_result:
