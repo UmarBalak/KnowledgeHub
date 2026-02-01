@@ -42,7 +42,7 @@ class LLM:
                 self.chat_memory.messages = self.chat_memory.messages[-self.max_messages:]
 
 
-    def __init__(self, gpt5: bool = True, kimi: bool = False, return_messages: bool = True, max_messages: int = 10):
+    def __init__(self, gpt5: bool = False, kimi: bool = True, return_messages: bool = True, max_messages: int = 10):
         self.gpt5 = gpt5
         self.kimi = kimi
 
@@ -135,42 +135,6 @@ class LLM:
         except Exception as e:
                 print(f"Unexpected error generating LLM response: {str(e)}")
                 raise RuntimeError(f"Unexpected error: {str(e)}") from e
-
-    def invoke(self, prompt: str, stop: Optional[list] = None) -> dict:
-        """
-        Generates response from LLM model with memory context.
-        """
-        try:
-            # Get chat history from memory
-            chat_history = self.memory.chat_memory.messages
-
-            # Create messages list with history + current prompt
-            if isinstance(prompt, str):
-                messages = chat_history + [HumanMessage(content=prompt)]
-            else:
-                messages = chat_history + [prompt]
-
-            # Get response from appropriate LLM
-            if self.gpt5:
-                logging.info("Calling gpt5...")
-                response = self.__azure_gpt5_llm(messages, stop)
-            elif self.kimi:
-                logging.info("Calling kimi-k2...")
-                response = self.__azure_kimi_llm(messages, stop)
-            else:
-                response = self.__together_llm(messages, stop)
-
-            # Save the interaction to memory
-            self.memory.save_context(
-                {"input": prompt if isinstance(prompt, str) else prompt.content},
-                {"output": response.content}
-            )
-            return self.normalize_ai_message(response)
-
-        except Exception as e:
-            logging.error("Error normalizing response")
-            print(f"Error in invoke with memory: {str(e)}")
-            raise
 
     def invoke_with_template(self, chat_prompt_template, variables: dict, stop: Optional[list] = None) -> dict:
         """
