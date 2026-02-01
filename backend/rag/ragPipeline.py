@@ -64,7 +64,7 @@ class RAGPipeline:
     4. Original document storage in Azure Blob Storage
     """
 
-    def __init__(self, index_name: str, llm_gpt5: bool = False, llm_kimi: bool = True, chunk_size: int = 1200, chunk_overlap: int = 150):
+    def __init__(self, index_name: str, llm_model: str, chunk_size: int = 1200, chunk_overlap: int = 150):
         self.index_name = index_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -74,6 +74,7 @@ class RAGPipeline:
         self.embedding_model = os.getenv("EMBEDDING_MODEL") or os.getenv("PINECONE_EMBEDDING_MODEL")
         self.azure_blob_url = os.getenv("BLOB_SAS_URL")
         self.container_name = os.getenv("BLOB_CONTAINER_NAME")
+        self.llm_model = llm_model
 
         if not all([self.pinecone_api_key, self.embedding_model, self.azure_blob_url, self.container_name]):
             raise ValueError("Required environment variables not set.")
@@ -82,7 +83,7 @@ class RAGPipeline:
         self.embeddings = PineconeEmbeddings(model=self.embedding_model)
         self.vector_store = None
         self.pcIndex = Pinecone(api_key=self.pinecone_api_key)
-        self.llm = LLM(gpt5=llm_gpt5, kimi=llm_kimi, max_messages=10)
+        self.llm = LLM(llm_model=self.llm_model, max_messages=10)
 
         # Enhanced text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(

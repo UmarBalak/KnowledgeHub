@@ -42,9 +42,8 @@ class LLM:
                 self.chat_memory.messages = self.chat_memory.messages[-self.max_messages:]
 
 
-    def __init__(self, gpt5: bool = False, kimi: bool = True, return_messages: bool = True, max_messages: int = 10):
-        self.gpt5 = gpt5
-        self.kimi = kimi
+    def __init__(self, llm_model: str = "gpt", return_messages: bool = True, max_messages: int = 10):
+        self.llm_model = llm_model
 
         # Initialize the LLM instance for memory
         self._llm_instance = self._get_llm_instance()
@@ -58,12 +57,12 @@ class LLM:
 
     def _get_llm_instance(self):
         """Get the appropriate LLM instance for memory operations"""
-        if self.gpt5:
+        if self.llm_model == "gpt":
             return AzureChatOpenAI(
                 deployment_name=self.AZURE_MODEL_NAMES[0],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
-        elif self.kimi:
+        elif self.llm_model == "kimi":
             return AzureChatOpenAI(
                 deployment_name=self.AZURE_MODEL_NAMES[1],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
@@ -136,6 +135,43 @@ class LLM:
                 print(f"Unexpected error generating LLM response: {str(e)}")
                 raise RuntimeError(f"Unexpected error: {str(e)}") from e
 
+    # Required for instant llm testing
+    def invoke(self, prompt: str, stop: Optional[list] = None) -> dict:
+        """
+        Generates response from LLM model with memory context.
+        """
+        try:
+            # Get chat history from memory
+            chat_history = self.memory.chat_memory.messages
+
+            # Create messages list with history + current prompt
+            if isinstance(prompt, str):
+                messages = chat_history + [HumanMessage(content=prompt)]
+            else:
+                messages = chat_history + [prompt]
+
+            # Get response from appropriate LLM
+            if self.llm_model == "gpt":
+                logging.info("Calling gpt5...")
+                response = self.__azure_gpt5_llm(messages, stop)
+            elif self.llm_model == "kimi":
+                logging.info("Calling kimi...")
+                response = self.__azure_kimi_llm(messages, stop)
+            else:
+                response = self.__together_llm(messages, stop)
+
+            # Save the interaction to memory
+            self.memory.save_context(
+                {"input": prompt if isinstance(prompt, str) else prompt.content},
+                {"output": response.content}
+            )
+            return self.normalize_ai_message(response)
+
+        except Exception as e:
+            logging.error("Error normalizing response")
+            print(f"Error in invoke with memory: {str(e)}")
+            raise
+
     def invoke_with_template(self, chat_prompt_template, variables: dict, stop: Optional[list] = None) -> dict:
         """
         Invoke LLM with ChatPromptTemplate while preserving memory
@@ -151,9 +187,9 @@ class LLM:
             all_messages = chat_history + formatted_messages
             
             # Get response from appropriate LLM
-            if self.gpt5:
+            if self.llm_model == "gpt":
                 response = self.__azure_gpt5_llm(all_messages, stop)
-            elif self.kimi:
+            elif self.llm_model == "kimi":
                 response = self.__azure_kimi_llm(all_messages, stop)
             else:
                 response = self.__together_llm(all_messages, stop)
@@ -189,7 +225,7 @@ class LLM:
 
 if __name__ == "__main__":
     # Initialize LLM with memory (using GPT-5 by default)
-    llm_with_memory = LLM(gpt5=False, kimi=True)
+    llm_with_memory = LLM(llm_model="kimi")
     
     # Example conversation
     try:

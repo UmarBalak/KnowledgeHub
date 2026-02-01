@@ -81,6 +81,8 @@ ALGORITHM = "HS256"
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL")
 
+LLM_MODEL = os.getenv("LLM_MODEL")
+
 security = HTTPBearer()
 
 app.add_middleware(
@@ -92,7 +94,7 @@ app.add_middleware(
     expose_headers=["Set-Cookie"],
 )
 
-rag_pipeline = RAGPipeline(index_name=os.getenv("PINECONE_INDEX_NAME"))
+rag_pipeline = RAGPipeline(index_name=os.getenv("PINECONE_INDEX_NAME"), llm_model=LLM_MODEL)
 
 # --- Pydantic Models ---
 class SpaceStats(BaseModel):
@@ -182,7 +184,7 @@ user_llm_cache = {}
 def get_user_llm(user_id):
     if user_id not in user_llm_cache:
         from llmModels import LLM
-        user_llm_cache[user_id] = LLM(gpt5=True)
+        user_llm_cache[user_id] = LLM(llm_model=LLM_MODEL)
     return user_llm_cache[user_id]
 
 # --- Dependencies ---
