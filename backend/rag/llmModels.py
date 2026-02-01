@@ -15,7 +15,11 @@ TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 LLM_MODEL = os.getenv("TOGETHER_MODEL_LLM1")
 
 AZURE_AI_FOUNDRY_API_KEY = os.getenv("AZURE_AI_FOUNDRY_API_KEY")
-AZURE_DEPLOYMENT_MODEL_NAMES = os.getenv("AZURE_DEPLOYMENT_MODEL_NAMES").split(',')
+AZURE_DEPLOYMENT_MODELS = os.getenv("AZURE_DEPLOYMENT_MODEL_NAMES")
+if AZURE_DEPLOYMENT_MODELS:
+    AZURE_DEPLOYMENT_MODEL_NAMES = AZURE_DEPLOYMENT_MODELS.split(",")
+
+OPENAI_API_VERSION=os.getenv("OPENAI_API_VERSION")
 
 if not TOGETHER_API_KEY:
     raise ValueError("TOGETHER_API_KEY must be set as an environment variable.")
@@ -26,7 +30,8 @@ class LLM:
     model_name: str = LLM_MODEL
     together_api_key: str = TOGETHER_API_KEY
     AZURE_AI_FOUNDRY_API_KEY: str = AZURE_AI_FOUNDRY_API_KEY
-    AZURE_DEPLOYMENT_MODEL_NAMES: list = AZURE_DEPLOYMENT_MODEL_NAMES
+    AZURE_MODEL_NAMES: list = AZURE_DEPLOYMENT_MODEL_NAMES
+    OPENAI_API_VERSION: str = OPENAI_API_VERSION
 
     class LimitedBufferMemory(ConversationBufferMemory):
         max_messages: int = Field(default=5)
@@ -55,12 +60,12 @@ class LLM:
         """Get the appropriate LLM instance for memory operations"""
         if self.gpt5:
             return AzureChatOpenAI(
-                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[0],
+                deployment_name=self.AZURE_MODEL_NAMES[0],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
         elif self.kimi:
             return AzureChatOpenAI(
-                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[1],
+                deployment_name=self.AZURE_MODEL_NAMES[1],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
         else:
@@ -88,7 +93,7 @@ class LLM:
     def __azure_gpt5_llm(self, prompt: str, stop: Optional[list] = None):
         try:
             llm = AzureChatOpenAI(
-                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[0],
+                deployment_name=self.AZURE_MODEL_NAMES[0],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
             logging.info("Gpt5-mini LLM initialized.")
@@ -102,7 +107,7 @@ class LLM:
     def __azure_kimi_llm(self, prompt: str, stop: Optional[list] = None):
         try:
             llm = AzureChatOpenAI(
-                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[1],
+                deployment_name=self.AZURE_MODEL_NAMES[1],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
             logging.info("Kimi-K2-Thinking LLM initialized.")
@@ -220,7 +225,7 @@ class LLM:
 
 if __name__ == "__main__":
     # Initialize LLM with memory (using GPT-5 by default)
-    llm_with_memory = LLM(gpt5=True, kimi=True)
+    llm_with_memory = LLM(gpt5=False, kimi=True)
     
     # Example conversation
     try:
