@@ -14,9 +14,8 @@ load_dotenv()
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 LLM_MODEL = os.getenv("TOGETHER_MODEL_LLM1")
 
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_GPT5_MINI_ENDPOINT")
 AZURE_AI_FOUNDRY_API_KEY = os.getenv("AZURE_AI_FOUNDRY_API_KEY")
-AZURE_API_VERSION = os.getenv("OPENAI_API_VERSION")
+AZURE_DEPLOYMENT_MODEL_NAMES = os.getenv("AZURE_DEPLOYMENT_MODEL_NAMES").split(',')
 
 if not TOGETHER_API_KEY:
     raise ValueError("TOGETHER_API_KEY must be set as an environment variable.")
@@ -27,7 +26,8 @@ class LLM:
     model_name: str = LLM_MODEL
     together_api_key: str = TOGETHER_API_KEY
     AZURE_AI_FOUNDRY_API_KEY: str = AZURE_AI_FOUNDRY_API_KEY
-    AZURE_OPENAI_ENDPOINT: str = AZURE_OPENAI_ENDPOINT
+    AZURE_DEPLOYMENT_MODEL_NAMES: list = AZURE_DEPLOYMENT_MODEL_NAMES
+
     class LimitedBufferMemory(ConversationBufferMemory):
         max_messages: int = Field(default=5)
 
@@ -37,8 +37,9 @@ class LLM:
                 self.chat_memory.messages = self.chat_memory.messages[-self.max_messages:]
 
 
-    def __init__(self, gpt5: bool = True, return_messages: bool = True, max_messages: int = 10):
+    def __init__(self, gpt5: bool = True, kimi: bool = False, return_messages: bool = True, max_messages: int = 10):
         self.gpt5 = gpt5
+        self.kimi = kimi
 
         # Initialize the LLM instance for memory
         self._llm_instance = self._get_llm_instance()
@@ -54,7 +55,12 @@ class LLM:
         """Get the appropriate LLM instance for memory operations"""
         if self.gpt5:
             return AzureChatOpenAI(
-                deployment_name="gpt-5-mini",
+                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[0],
+                api_key=self.AZURE_AI_FOUNDRY_API_KEY,
+            )
+        elif self.kimi:
+            return AzureChatOpenAI(
+                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[1],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
         else:
@@ -79,13 +85,27 @@ class LLM:
             }
         }
 
-    def __azure_llm(self, prompt: str, stop: Optional[list] = None):
+    def __azure_gpt5_llm(self, prompt: str, stop: Optional[list] = None):
         try:
             llm = AzureChatOpenAI(
-                deployment_name="gpt-5-mini",
+                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[0],
                 api_key=self.AZURE_AI_FOUNDRY_API_KEY,
             )
             logging.info("Gpt5-mini LLM initialized.")
+            response = llm.invoke(prompt, stop=stop)
+            logging.info(f"LLM response: {response}")
+            return response
+        except Exception as e:
+            print(f"Error with Azure LLM: {str(e)}")
+            raise RuntimeError(f"Azure LLM error: {str(e)}") from e
+        
+    def __azure_kimi_llm(self, prompt: str, stop: Optional[list] = None):
+        try:
+            llm = AzureChatOpenAI(
+                deployment_name=self.AZURE_DEPLOYMENT_MODEL_NAMES[1],
+                api_key=self.AZURE_AI_FOUNDRY_API_KEY,
+            )
+            logging.info("Kimi-K2-Thinking LLM initialized.")
             response = llm.invoke(prompt, stop=stop)
             logging.info(f"LLM response: {response}")
             return response
@@ -128,7 +148,10 @@ class LLM:
             # Get response from appropriate LLM
             if self.gpt5:
                 logging.info("Calling gpt5...")
-                response = self.__azure_llm(messages, stop)
+                response = self.__azure_gpt5_llm(messages, stop)
+            elif self.kimi:
+                logging.info("Calling kimi-k2...")
+                response = self.__azure_kimi_llm(messages, stop)
             else:
                 response = self.__together_llm(messages, stop)
 
@@ -160,7 +183,9 @@ class LLM:
             
             # Get response from appropriate LLM
             if self.gpt5:
-                response = self.__azure_llm(all_messages, stop)
+                response = self.__azure_gpt5_llm(all_messages, stop)
+            elif self.kimi:
+                response = self.__azure_kimi_llm(all_messages, stop)
             else:
                 response = self.__together_llm(all_messages, stop)
 
@@ -195,7 +220,7 @@ class LLM:
 
 if __name__ == "__main__":
     # Initialize LLM with memory (using GPT-5 by default)
-    llm_with_memory = LLM(gpt5=True)
+    llm_with_memory = LLM(gpt5=True, kimi=True)
     
     # Example conversation
     try:
