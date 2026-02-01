@@ -587,7 +587,7 @@ class RAGPipeline:
                 ## Output Format
                 - Use clean Markdown only.
                 - Use headings, bullet points and numbered steps, bold, italic, tables, code, equations, when appropriate.
-                - Ensure headings use markdown syntax #, ##, etc., properly without '\n' characters.
+                - Ensure headings use markdown syntax #, ##, etc., properly.
                 - Do not include raw system text or explanations of internal behavior.
 
                 ### **1. Mathematical Notation (LaTeX)**
@@ -597,7 +597,7 @@ class RAGPipeline:
 
                 * **Block Math:** Wrap complex formulas, multi-line equations, or primary derivations in double dollar signs on new lines.
 
-                * **Symbols:** Always use LaTeX commands for Greek letters (e.g., `\sigma`, `\alpha`), subscripts, and summations.
+                * **Symbols:** Always use LaTeX commands for Greek letters, subscripts, and summations.
 
                 ### **2. Code Blocks & Syntax Highlighting**
 
