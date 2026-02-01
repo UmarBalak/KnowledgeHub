@@ -99,6 +99,29 @@ Authorization is enforced using:
 
 ---
 
+## Space-Scoped Team Chat (Backend Support)
+
+The backend supports a space-scoped team chat system to enable collaborative discussion alongside document-based learning.
+
+### Design Principles
+
+* Team chat is space-isolated
+* Messages are accessible only to space members
+* Team chat content is not used in RAG pipelines
+* Clear separation between:
+  * Human discussion
+  * AI-generated answers
+
+### Why Team Chat Is Separate from RAG
+
+This design avoids:
+
+* Contaminating document-grounded answers
+* Hallucinations from informal discussions
+* Mixing unverified content with curated material
+
+---
+
 ## Complete System Flow (Backend Perspective)
 
 This section describes the **full backend execution path** for all major operations.

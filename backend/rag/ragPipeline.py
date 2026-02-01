@@ -597,7 +597,7 @@ class RAGPipeline:
 
                 * **Block Math:** Wrap complex formulas, multi-line equations, or primary derivations in double dollar signs on new lines.
 
-                * **Symbols:** Always use LaTeX commands for Greek letters (e.g., `\sigma`, `\alpha`), subscripts (e.g., `x_{i}`), and summations.
+                * **Symbols:** Always use LaTeX commands for Greek letters (e.g., `\sigma`, `\alpha`), subscripts, and summations.
 
                 ### **2. Code Blocks & Syntax Highlighting**
 
