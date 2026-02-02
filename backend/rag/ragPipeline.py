@@ -4,7 +4,7 @@ import hashlib
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, asdict
 from numpy import spacing
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitter import CharacterTextSplitter
 from langchain.schema import Document
 from langchain.prompts.chat import (
     ChatPromptTemplate,
@@ -85,20 +85,11 @@ class RAGPipeline:
         self.pcIndex = Pinecone(api_key=self.pinecone_api_key)
         self.llm = LLM(llm_model=self.llm_model, max_messages=10)
 
-        # Enhanced text splitter
-        self.text_splitter = RecursiveCharacterTextSplitter(
+        self.text_splitter = CharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             length_function=len,
-            separators=[
-                "\n## ",   # markdown sections (very important for PDFs)
-                "\n# ",
-                "\n\n",    # paragraph boundaries
-                "\n",      # line breaks
-                ". ",      # sentences
-                " ",       # fallback
-                ""
-            ],
+            separator=" "
         )
 
 
@@ -248,7 +239,7 @@ class RAGPipeline:
 
         next_index = start_index + len(chunk_texts)
         return chunks, next_index
-
+                                                
     def process_and_index_document(
         self, 
         blob_url: str, 
