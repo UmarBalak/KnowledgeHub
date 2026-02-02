@@ -327,8 +327,8 @@ async def chat_ws(
     websocket: WebSocket,
     space_id: int,
     token: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
 ):
+    # 1. Validate Token (No changes here)
     if not token:
         logging.warning("WS rejected: missing token")
         await websocket.close(code=WS_1008_POLICY_VIOLATION)
@@ -336,50 +336,54 @@ async def chat_ws(
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-
         if payload.get("scope") != "ws":
             raise jwt.InvalidTokenError()
-
         user_id = payload.get("sub")
         user_name = payload.get("name")
-
-    except jwt.ExpiredSignatureError:
-        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Expired")
-        return
-    except jwt.PyJWTError:
-        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Invalid")
+    except (jwt.ExpiredSignatureError, jwt.PyJWTError):
+        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Invalid Token")
         return
 
-    if not is_user_member(db, user_id, space_id):
-        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Forbidden")
-        return
+    # 2. Check Membership using a short-lived session
+    # We open a connection, check, and close it immediately.
+    with SessionLocal() as db:
+        if not is_user_member(db, user_id, space_id):
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Forbidden")
+            return
 
     await chat_manager.connect(websocket, space_id)
 
     try:
         while True:
+            # Wait for user message (This can take minutes/hours)
+            # During this wait, NO database connection is held open.
             text = await websocket.receive_text()
 
-            msg = ChatMessage(
-                space_id=space_id,
-                user_id=user_id,
-                content=text,
-                created_at=datetime.utcnow(),
-            )
-            db.add(msg)
-            db.commit()
-            db.refresh(msg)
-
-            await chat_manager.broadcast(
-                space_id,
-                {
+            # 3. Save message using a FRESH short-lived session
+            msg_data = None
+            with SessionLocal() as db:
+                msg = ChatMessage(
+                    space_id=space_id,
+                    user_id=user_id,
+                    content=text,
+                    created_at=datetime.utcnow(),
+                )
+                db.add(msg)
+                db.commit()
+                db.refresh(msg)
+                
+                # Copy data to a dict so we can use it after the DB session closes
+                msg_data = {
                     "id": msg.id,
                     "user_id": user_id,
                     "user_name": user_name,
                     "content": msg.content,
                     "created_at": msg.created_at.isoformat(),
-                },
-            )
+                }
+
+            # Broadcast to other users (No DB connection needed here)
+            if msg_data:
+                await chat_manager.broadcast(space_id, msg_data)
 
     except WebSocketDisconnect:
         chat_manager.disconnect(websocket, space_id)
