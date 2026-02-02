@@ -282,32 +282,23 @@ class RAGPipeline:
             global_chunk_index = 0
             
             for doc in documents:
-                semantic_blocks = self._split_into_semantic_blocks(doc.page_content)
-
-                for block in semantic_blocks:
-                    # If block is small enough, keep it intact
-                    if len(block) <= 2500:
-                        blocks_to_split = [block]
-                    else:
-                        # Only now apply recursive splitting
-                        blocks_to_split = self.text_splitter.split_text(block)
-
-                    for split_block in blocks_to_split:
-                        page_chunks, global_chunk_index = self._create_enhanced_chunks_with_metadata(
-                            split_block,
-                            filename,
-                            enhanced_doc_id,
-                            space_id,
-                            original_blob_url,
-                            file_type,
-                            start_index=global_chunk_index
-                        )
-
-                        for c in page_chunks:
-                            c.metadata["parser"] = doc.metadata.get("parser")
-
-                        chunked_docs.extend(page_chunks)
-
+                page_content = doc.page_content
+                
+                page_chunks, global_chunk_index = self._create_enhanced_chunks_with_metadata(
+                    page_content,
+                    filename,
+                    enhanced_doc_id,  # Use enhanced ID here
+                    space_id,
+                    original_blob_url,
+                    file_type,
+                    start_index=global_chunk_index
+                )
+                
+                # Add page and parser info to each chunk
+                for c in page_chunks:
+                    c.metadata["parser"] = doc.metadata.get("parser")
+                
+                chunked_docs.extend(page_chunks)
             
             metadata.chunk_count = len(chunked_docs)
             logger.info(f"Split document into {len(chunked_docs)} enhanced chunks")
