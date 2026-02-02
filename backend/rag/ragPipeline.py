@@ -64,7 +64,7 @@ class RAGPipeline:
     4. Original document storage in Azure Blob Storage
     """
 
-    def __init__(self, index_name: str, llm_model: str, chunk_size: int = 1200, chunk_overlap: int = 150):
+    def __init__(self, index_name: str, llm_model: str, chunk_size: int = 2000, chunk_overlap: int = 350):
         self.index_name = index_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
