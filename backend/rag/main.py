@@ -22,13 +22,7 @@ from datetime import datetime
 from starlette.responses import JSONResponse, Response
 import httpx
 
-from learning_insights import (
-    fetch_space_queries,
-    cluster_query_embeddings,
-    fetch_document_embeddings,
-    compute_coverage,
-    summarize_gap
-)
+from learning_insights import get_query_clusters, analyze_cluster_coverage, summarize_gap_topics
 
 
 # Imports from your project structure
@@ -796,9 +790,6 @@ def analyze_learning_gaps(
         } 
 
     # 2. Cluster
-    # Use the refactored functions from learning_insights
-    from learning_insights import get_query_clusters, analyze_cluster_coverage, summarize_gap_topics
-    
     centroids, clustered_queries = get_query_clusters(query_logs)
 
     # 3. Check Coverage using EXISTING rag_pipeline
