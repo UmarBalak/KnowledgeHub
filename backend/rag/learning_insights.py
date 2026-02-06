@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
+from pinecone import Pinecone
 
 from models import QueryLog
 from ragPipeline import RAGPipeline   
@@ -46,13 +47,23 @@ def cluster_query_embeddings(query_logs, k=5):
 # Fetch document embeddings from Pinecone
 # -----------------------------
 def fetch_document_embeddings(space_id: int, limit: int = 500):
-    index = RAGPipeline.index
+    """
+    Connects to Pinecone to retrieve embeddings for documents in a space.
+    This fix bypasses the RAGPipeline class attribute error.
+    """
+    # 1. Initialize Pinecone using environment variables
+    pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+    index_name = os.getenv("PINECONE_INDEX_NAME")
+    index = pc.Index(index_name)
 
-    dummy_vector = [0.0] * RAGPipeline.embedding_dimension
+    # 2. Use the standard embedding dimension (e.g., 1536 for OpenAI models)
+    embedding_dim = 1536 
+    dummy_vector = [0.0] * embedding_dim
 
+    # 3. Query using metadata filter for the space_id
     res = index.query(
         vector=dummy_vector,
-        filter={"space_id": space_id},
+        filter={"space_id": {"$eq": space_id}},
         top_k=limit,
         include_values=True
     )
