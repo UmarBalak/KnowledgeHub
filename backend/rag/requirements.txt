@@ -150,4 +150,4 @@ pymupdf4llm
 pymupdf-layout
 unstructured
 unstructured[local-inference]
-
+scikit-learn==1.8.0
