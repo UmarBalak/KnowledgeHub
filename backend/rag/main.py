@@ -784,18 +784,16 @@ def analyze_learning_gaps(
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Only maintainers can access
-    require_maintainer(user)
+    require_maintainer(user) #
 
-    # 1. Fetch queries
-    query_logs = fetch_space_queries(db, space_id)
+    query_logs = fetch_space_queries(db, space_id) #
 
     if len(query_logs) < 5:
         return {
             "coverage_score": 0,
             "top_learning_gaps": [],
             "message": "Not enough data to analyze learning gaps"
-        }
+        } 
 
     # 2. Cluster queries
     model, labels, embeddings = cluster_query_embeddings(query_logs)
