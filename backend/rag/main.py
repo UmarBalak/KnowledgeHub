@@ -22,7 +22,7 @@ from datetime import datetime
 from starlette.responses import JSONResponse, Response
 import httpx
 
-from learning_insights import get_query_clusters, analyze_cluster_coverage, summarize_gap_topics
+from learning_insights import get_query_clusters, analyze_cluster_coverage, summarize_gap_topics, fetch_space_queries
 
 
 # Imports from your project structure
