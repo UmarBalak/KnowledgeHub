@@ -1,104 +1,123 @@
-# learning_insights.py
-
 import numpy as np
 from sklearn.cluster import KMeans
-from sklearn.metrics.pairwise import cosine_similarity
-from sqlalchemy.orm import Session
-from pinecone import Pinecone
-
-from models import QueryLog
-from ragPipeline import RAGPipeline   
 from llmModels import LLM
-
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
 LLM_MODEL = os.getenv("LLM_MODEL")
 
 # -----------------------------
-# Fetch recent queries per space
+# 1. Cluster Queries (Intent Discovery)
 # -----------------------------
-def fetch_space_queries(db: Session, space_id: int, limit: int = 200):
-    return (
-        db.query(QueryLog)
-        .filter(QueryLog.space_id == space_id)
-        .order_by(QueryLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+def get_query_clusters(query_logs, k=5):
+    """
+    Groups queries into K clusters and returns the centroids and grouped queries.
+    """
+    if not query_logs:
+        return [], []
 
-
-# -----------------------------
-# Cluster query embeddings
-# -----------------------------
-def cluster_query_embeddings(query_logs, k=5):
+    # Extract embeddings
     embeddings = np.array([q.query_embedding for q in query_logs])
+    
+    # Handle cases with fewer queries than k
+    num_samples = len(embeddings)
+    actual_k = min(k, num_samples)
+    
+    if actual_k < 1:
+        return [], []
 
-    if len(embeddings) < k:
-        k = max(1, len(embeddings))
+    kmeans = KMeans(n_clusters=actual_k, random_state=42)
+    labels = kmeans.fit_predict(embeddings)
+    centroids = kmeans.cluster_centers_
 
-    model = KMeans(n_clusters=k, random_state=42)
-    labels = model.fit_predict(embeddings)
+    # Group actual query objects by cluster label
+    clustered_queries = {i: [] for i in range(actual_k)}
+    for idx, label in enumerate(labels):
+        clustered_queries[label].append(query_logs[idx])
 
-    return model, labels, embeddings
-
+    return centroids, clustered_queries
 
 # -----------------------------
-# Fetch document embeddings from Pinecone
+# 2. Check Coverage (Inverted Logic)
 # -----------------------------
-def fetch_document_embeddings(space_id: int, limit: int = 500):
+def analyze_cluster_coverage(centroids, space_id, rag_pipeline, threshold=0.75):
     """
-    Connects to Pinecone to retrieve embeddings for documents in a space.
-    This fix bypasses the RAGPipeline class attribute error.
+    Instead of fetching all docs, we ask Pinecone: 
+    'Do you have any content similar to this abstract query centroid?'
     """
-    # 1. Initialize Pinecone using environment variables
-    pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-    index_name = os.getenv("PINECONE_INDEX_NAME")
-    index = pc.Index(index_name)
+    gaps_indices = []
+    covered_count = 0
+    
+    # Access the raw index from your pipeline
+    index = rag_pipeline.pcIndex.Index(rag_pipeline.index_name)
 
-    # 2. Use the standard embedding dimension (e.g., 1536 for OpenAI models)
-    embedding_dim = 1024
-    dummy_vector = [0.0] * embedding_dim
+    for i, centroid in enumerate(centroids):
+        # Query Pinecone with the CENTROID vector
+        try:
+            res = index.query(
+                vector=centroid.tolist(),
+                filter={"space_id": space_id},
+                top_k=1, # We only need the single best match to determine coverage
+                include_values=False
+            )
+            
+            # Check the score of the best match
+            matches = res.get("matches", [])
+            best_score = matches[0]["score"] if matches else 0.0
 
-    # 3. Query using metadata filter for the space_id
-    res = index.query(
-        vector=dummy_vector,
-        filter={"space_id": {"$eq": space_id}},
-        top_k=limit,
-        include_values=True
-    )
+            if best_score >= threshold:
+                covered_count += 1
+            else:
+                gaps_indices.append(i) # This cluster index is a gap
+                
+        except Exception as e:
+            print(f"Error checking coverage for cluster {i}: {e}")
+            # Assume gap on error to be safe
+            gaps_indices.append(i)
 
-    return [m["values"] for m in res.get("matches", [])]
+    coverage_score = 0
+    if len(centroids) > 0:
+        coverage_score = int((covered_count / len(centroids)) * 100)
 
+    return coverage_score, gaps_indices
 
 # -----------------------------
-# Compute coverage score
+# 3. Summarize Gaps
 # -----------------------------
-def compute_coverage(cluster_center, document_embeddings):
-    if not document_embeddings:
-        return 0.0
-
-    sims = cosine_similarity(
-        cluster_center.reshape(1, -1),
-        np.array(document_embeddings)
-    )
-
-    return float(sims.max())
-
-
-# -----------------------------
-# Summarize learning gap (LLM)
-# -----------------------------
-def summarize_gap(sample_queries: list[str]):
+def summarize_gap_topics(gap_indices, clustered_queries):
+    """
+    Sends the actual query text to LLM to summarize the confusion.
+    """
     llm = LLM(llm_model=LLM_MODEL, max_messages=0)
+    summaries = []
 
-    prompt = f"""
-    The following trainee questions show a common confusion:
+    for idx in gap_indices:
+        queries = clustered_queries.get(idx, [])
+        
+        # FIX: We need 'query_text', currently missing in QueryLog model.
+        # Assuming you add it, or temporarily use a placeholder.
+        # We take a sample of 5 to avoid overflowing context
+        sample_texts = [
+            getattr(q, "query_text", "Text unavailable") 
+            for q in queries[:5]
+        ]
+        
+        prompt = f"""
+        The following are user questions that retrieved NO relevant documentation from our knowledge base:
+        
+        {sample_texts}
+        
+        Identify the specific technical topic or concept these users are looking for.
+        Return ONLY a short, 3-5 word label (e.g., "SQL Window Functions", "Azure Blob SAS Tokens").
+        """
+        
+        try:
+            summary = llm.invoke(prompt)["content"].strip()
+            # Clean up quotes if LLM adds them
+            summary = summary.replace('"', '').replace("'", "")
+            summaries.append(summary)
+        except Exception as e:
+            summaries.append("Unidentified Topic")
 
-    {sample_queries}
-
-    Summarize the core technical concept trainees are struggling with.
-    Answer in one short phrase.
-    """
-
-    return llm.invoke(prompt)["content"].strip()
+    return summaries
