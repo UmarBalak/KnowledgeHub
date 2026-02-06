@@ -22,6 +22,15 @@ from datetime import datetime
 from starlette.responses import JSONResponse, Response
 import httpx
 
+from learning_insights import (
+    fetch_space_queries,
+    cluster_query_embeddings,
+    fetch_document_embeddings,
+    compute_coverage,
+    summarize_gap
+)
+
+
 # Imports from your project structure
 from database import get_db, Base, engine, SessionLocal
 from models import Space, SpaceMembership, Document, DocumentChunk, QueryLog, ChatMessage, SpaceRoleEnum, DisplayModeEnum
@@ -767,6 +776,57 @@ async def delete_document(
         raise HTTPException(status_code=500, detail=f"Database deletion failed: {e}")
     
     return {"message": "Document deleted successfully"}
+
+
+@app.post("/spaces/{space_id}/insights/learning-gaps")
+def analyze_learning_gaps(
+    space_id: int,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Only maintainers can access
+    require_maintainer(user)
+
+    # 1. Fetch queries
+    query_logs = fetch_space_queries(db, space_id)
+
+    if len(query_logs) < 5:
+        return {
+            "coverage_score": 0,
+            "top_learning_gaps": [],
+            "message": "Not enough data to analyze learning gaps"
+        }
+
+    # 2. Cluster queries
+    model, labels, embeddings = cluster_query_embeddings(query_logs)
+
+    # 3. Fetch document embeddings
+    document_embeddings = fetch_document_embeddings(space_id)
+
+    gaps = []
+    covered_clusters = 0
+
+    for cluster_id in set(labels):
+        indices = [i for i, l in enumerate(labels) if l == cluster_id]
+        centroid = model.cluster_centers_[cluster_id]
+
+        coverage = compute_coverage(centroid, document_embeddings)
+
+        if coverage < 0.75:
+            sample_queries = [query_logs[i].query_hash for i in indices[:5]]
+            summary = summarize_gap(sample_queries)
+            gaps.append(summary)
+        else:
+            covered_clusters += 1
+
+    coverage_score = int((covered_clusters / len(model.cluster_centers_)) * 100)
+
+    return {
+        "coverage_score": coverage_score,
+        "top_learning_gaps": gaps
+    }
+
+
 
 @app.get("/spaces/{space_id}/stats", response_model=SpaceStats)
 async def get_space_stats(
