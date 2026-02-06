@@ -142,6 +142,7 @@ class QueryLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(36), nullable=False)
     query_hash = Column(String(64), index=True, nullable=False)  # SHA-256 hash
+    query_text = Column(Text, nullable=True)
     query_embedding = Column(JSON, nullable=False)  # Vector for semantic matching
     response_text = Column(Text, nullable=False)
     sources = Column(JSON, nullable=True)
