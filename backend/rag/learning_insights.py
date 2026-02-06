@@ -15,6 +15,15 @@ logger = logging.getLogger("LearningInsights")
 load_dotenv()
 LLM_MODEL = os.getenv("LLM_MODEL")
 
+def fetch_space_queries(db: Session, space_id: int, limit: int = 200):
+    return (
+        db.query(QueryLog)
+        .filter(QueryLog.space_id == space_id)
+        .order_by(QueryLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    
 # -----------------------------
 # 1. Cluster Queries (Intent Discovery)
 # -----------------------------
