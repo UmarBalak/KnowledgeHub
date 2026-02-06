@@ -57,7 +57,7 @@ def fetch_document_embeddings(space_id: int, limit: int = 500):
     index = pc.Index(index_name)
 
     # 2. Use the standard embedding dimension (e.g., 1536 for OpenAI models)
-    embedding_dim = 1536 
+    embedding_dim = 1024
     dummy_vector = [0.0] * embedding_dim
 
     # 3. Query using metadata filter for the space_id
