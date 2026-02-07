@@ -163,14 +163,9 @@ def summarize_gap_topics(gap_indices, clustered_queries):
         logger.info(f"--- Summarizing Gap for Cluster {idx} ---")
         queries = clustered_queries.get(idx, [])
         
-        # Safe extraction of text (Handling if you haven't updated DB yet)
         sample_texts = []
         for q in queries[:5]:
-            # Try to get query_text, fallback to hash if text missing (for debugging)
             text = getattr(q, "query_text", None)
-            if not text:
-                logger.warning("   > 'query_text' missing in QueryLog! Using placeholder.")
-                text = f"[Hash: {q.query_hash[:8]}...]" 
             sample_texts.append(text)
         
         logger.info(f"   > Sending {len(sample_texts)} samples to LLM: {sample_texts}")

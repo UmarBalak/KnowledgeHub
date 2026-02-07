@@ -793,31 +793,22 @@ def analyze_learning_gaps(
     # 2. Cluster
     centroids, clustered_queries = get_query_clusters(query_logs)
 
-    # 3. Fetch document embeddings
-    document_embeddings = fetch_document_embeddings(space_id)
+    # 3. Check Coverage using EXISTING rag_pipeline
+    # This avoids recreating the pinecone connection
+    coverage_score, gap_indices = analyze_cluster_coverage(
+        centroids, 
+        space_id, 
+        rag_pipeline  # Pass the global pipeline object
+    )
 
-    gaps = []
-    covered_clusters = 0
-
-    for cluster_id in set(labels):
-        indices = [i for i, l in enumerate(labels) if l == cluster_id]
-        centroid = model.cluster_centers_[cluster_id]
-
-        coverage = compute_coverage(centroid, document_embeddings)
-
-        if coverage < 0.75:
-            sample_queries = [query_logs[i].query_hash for i in indices[:5]]
-            summary = summarize_gap(sample_queries)
-            gaps.append(summary)
-        else:
-            covered_clusters += 1
-
-    coverage_score = int((covered_clusters / len(model.cluster_centers_)) * 100)
+    # 4. Summarize
+    gaps = summarize_gap_topics(gap_indices, clustered_queries)
 
     return {
         "coverage_score": coverage_score,
         "top_learning_gaps": gaps
     }
+
 
 
 @app.get("/spaces/{space_id}/stats", response_model=SpaceStats)
