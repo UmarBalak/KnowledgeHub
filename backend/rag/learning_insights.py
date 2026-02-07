@@ -1,10 +1,10 @@
-import numpy as np
 import logging
 import os
 import json
+import numpy as np
+from sqlalchemy.orm import Session
 from sklearn.cluster import KMeans
 from dotenv import load_dotenv
-from sqlalchemy.orm import Session
 
 from llmModels import LLM
 from models import QueryLog 
@@ -16,7 +16,11 @@ logger = logging.getLogger("LearningInsights")
 load_dotenv()
 LLM_MODEL = os.getenv("LLM_MODEL")
 
-def fetch_space_queries(db: Session, space_id: int, limit: int = 200):
+def fetch_recent_queries(db: Session, space_id: int, limit: int = 300):
+    """
+    Fetch the most recent queries for analysis.
+    Limit to 300 to keep performance snappy.
+    """
     return (
         db.query(QueryLog)
         .filter(QueryLog.space_id == space_id)
@@ -24,146 +28,166 @@ def fetch_space_queries(db: Session, space_id: int, limit: int = 200):
         .limit(limit)
         .all()
     )
+
+def identify_gaps_from_logs(query_logs, strong_threshold=0.65, weak_threshold=0.45):
+    """
+    Analyzes historical logs to determine coverage using 'One Strong OR Two Weak' logic.
     
-# -----------------------------
-# 1. Cluster Queries (Intent Discovery)
-# -----------------------------
-def get_query_clusters(query_logs, k=5):
+    Logic:
+    1. PASS: At least one chunk has score >= strong_threshold (e.g. 0.65).
+       (Finding one perfect answer is a success).
+       
+    2. PASS: At least TWO chunks have score >= weak_threshold (e.g. 0.45).
+       (Finding corroborating evidence in multiple chunks is a success).
+       
+    3. FAIL (GAP): Everything else.
     """
-    Groups queries into K clusters.
-    Returns clustered_queries dictionary.
-    """
-    logger.info(f"STEP 1: Starting Query Clustering. Total logs received: {len(query_logs)}")
-    
-    if not query_logs:
-        logger.warning("STEP 1 SKIPPED: No query logs provided.")
-        return {}
+    gaps = []
+    covered_count = 0
+    total = len(query_logs)
 
-    try:
-        # Extract embeddings
-        embeddings = np.array([q.query_embedding for q in query_logs])
-        
-        # Handle cases with fewer queries than k
-        num_samples = len(embeddings)
-        actual_k = min(k, num_samples)
-        
-        if actual_k < 1:
-            return {}
-
-        kmeans = KMeans(n_clusters=actual_k, random_state=42)
-        labels = kmeans.fit_predict(embeddings)
-        
-        # Group actual query objects by cluster label
-        clustered_queries = {i: [] for i in range(actual_k)}
-        for idx, label in enumerate(labels):
-            clustered_queries[label].append(query_logs[idx])
-        
-        return clustered_queries
-
-    except Exception as e:
-        logger.error(f"STEP 1 FAILED: Error during clustering: {str(e)}", exc_info=True)
-        return {}
-
-# -----------------------------
-# 2. Check Coverage (Robust Sampling)
-# -----------------------------
-def analyze_cluster_coverage(clustered_queries, space_id, rag_pipeline, threshold=0.75):
-    """
-    Checks coverage by testing ACTUAL queries from each cluster against Pinecone.
-    """
-    logger.info(f"STEP 2: Starting Coverage Analysis for Space ID: {space_id}")
-    
-    if not clustered_queries:
+    if total == 0:
         return 0, []
 
-    gaps_indices = []
-    covered_clusters_count = 0
-    
-    try:
-        index = rag_pipeline.pcIndex.Index(rag_pipeline.index_name)
+    for log in query_logs:
+        # 1. Parse Sources safely
+        try:
+            sources = log.sources
+            # Handle case where sources might be stored as a string in some DBs
+            if isinstance(sources, str):
+                sources = json.loads(sources)
+            
+            if not isinstance(sources, list):
+                sources = []
+        except Exception as e:
+            logger.warning(f"Failed to parse sources for log {log.id}: {e}")
+            sources = []
 
-        for label, queries in clustered_queries.items():
-            # STRATEGY: Sample the top 3 most recent queries in this cluster
-            # This avoids checking 1000s of queries but is better than checking 1 centroid
-            samples = queries[:3] 
-            
-            passing_samples = 0
-            
-            logger.info(f"--- Analyzing Cluster {label} (checking {len(samples)} samples) ---")
-
-            for q in samples:
-                # Use the ACTUAL embedding from the user's query
-                # This ensures we test exactly what the user asked
-                vector_list = q.query_embedding
-                
-                res = index.query(
-                    vector=vector_list,
-                    filter={"space_id": {"$eq": space_id}},
-                    top_k=1, 
-                    include_values=False
-                )
-                
-                matches = res.get("matches", [])
-                if matches:
-                    score = matches[0].get("score", 0.0)
-                    if score >= threshold:
-                        passing_samples += 1
-            
-            # DECISION LOGIC:
-            # If more than 50% of the sample queries in this cluster failed the threshold,
-            # we consider the ENTIRE topic a "Learning Gap".
-            pass_rate = passing_samples / len(samples)
-            
-            if pass_rate >= 0.5:
-                logger.info(f"   > ✅ Cluster {label} COVERED (Pass Rate: {pass_rate:.2f})")
-                covered_clusters_count += 1
-            else:
-                logger.info(f"   > ❌ Cluster {label} is a GAP (Pass Rate: {pass_rate:.2f})")
-                gaps_indices.append(label)
-
-        # Calculate final coverage score
-        total_clusters = len(clustered_queries)
-        coverage_score = int((covered_clusters_count / total_clusters) * 100) if total_clusters > 0 else 0
+        # 2. Extract Scores (default to 0.0 if missing)
+        scores = [float(s.get("similarity_score", 0.0)) for s in sources]
         
-        return coverage_score, gaps_indices
+        is_covered = False
+        
+        # --- THE CORE LOGIC ---
+        
+        # Rule A: The "Golden Source" (One high-quality match is enough)
+        if any(s >= strong_threshold for s in scores):
+            is_covered = True
+            
+        # Rule B: The "Corroborated Evidence" (Two decent matches are enough)
+        # This helps when no single chunk is perfect, but the topic is clearly present
+        elif len([s for s in scores if s >= weak_threshold]) >= 2:
+            is_covered = True
+            
+        # ----------------------
 
-    except Exception as e:
-        logger.error(f"STEP 2 FAILED: Pinecone check error: {str(e)}", exc_info=True)
-        return 0, []
+        if is_covered:
+            covered_count += 1
+        else:
+            gaps.append(log)
 
-# -----------------------------
-# 3. Summarize Gaps (LLM)
-# -----------------------------
-def summarize_gap_topics(gap_indices, clustered_queries):
+    # Calculate percentage
+    coverage_score = int((covered_count / total) * 100) if total > 0 else 0
+    logger.info(f"Gap Analysis: {covered_count}/{total} queries covered. Found {len(gaps)} gaps.")
+    
+    return coverage_score, gaps
+
+def cluster_and_summarize_gaps(gap_logs, n_clusters=5):
     """
-    Summarizes the missing topics using the LLM.
+    Takes the queries identified as GAPS, clusters them, and names the missing topics using LLM.
     """
-    if not gap_indices:
+    if not gap_logs:
         return []
 
-    llm = LLM(llm_model=LLM_MODEL, max_messages=0)
-    summaries = []
+    try:
+        # 1. Extract Embeddings
+        # We use the embeddings already stored in the log (no new API costs)
+        embeddings = [np.array(log.query_embedding) for log in gap_logs]
+        
+        # Adjust cluster count if we have fewer gaps than n_clusters
+        actual_k = min(n_clusters, len(embeddings))
+        if actual_k < 1:
+            return []
 
-    for idx in gap_indices:
-        queries = clustered_queries.get(idx, [])
-        
-        # Use the text of the queries we actually found
-        sample_texts = [q.query_text for q in queries[:5]]
-        
-        prompt = f"""
-        The following are specific user questions that our knowledge base failed to answer confidently (low similarity score matches):
-        
-        {sample_texts}
-        
-        Analyze these questions and identify the MISSING knowledge topic.
-        Return ONLY a short, 3-5 word label (e.g., "React Hook Form Validation", "Azure Blob Storage Authentication").
-        """
-        
-        try:
-            response = llm.invoke(prompt)
-            summary = response.get("content", "").strip().replace('"', '').replace("'", "")
-            summaries.append(summary)
-        except Exception:
-            summaries.append("Unidentified Topic")
+        # 2. Perform K-Means Clustering
+        kmeans = KMeans(n_clusters=actual_k, random_state=42)
+        labels = kmeans.fit_predict(embeddings)
 
-    return summaries
+        # 3. Group Text by Cluster
+        clustered_texts = {i: [] for i in range(actual_k)}
+        for idx, label in enumerate(labels):
+            clustered_texts[label].append(gap_logs[idx].query_text)
+
+        # 4. Generate Summaries with LLM
+        llm = LLM(llm_model=LLM_MODEL, max_messages=0)
+        topic_summaries = []
+
+        for label, texts in clustered_texts.items():
+            # Send top 10 examples to LLM
+            examples = texts[:10]
+            
+            prompt = f"""
+            The following are user questions where our vector database found NO relevant internal documents (low similarity scores):
+            
+            {examples}
+            
+            These questions were likely answered using the AI's general knowledge.
+            Analyze them and identify the **Missing Documentation Topic**.
+            Note: If the topic is purely "Chit-Chat" (e.g., greetings, jokes), ignore them.
+            
+            Return ONLY a short, 3-5 word label (e.g., "Project X Deployment", "Python Basics", "HR Leave Policy").
+            """
+            
+            try:
+                response = llm.invoke(prompt)
+                topic = response.get("content", "").strip().replace('"', '').replace("'", "")
+                
+                topic_summaries.append({
+                    "topic": topic,
+                    "gap_count": len(texts), # Number of users asking about this
+                    "example_query": examples[0]
+                })
+            except Exception as e:
+                logger.error(f"LLM Summary failed: {e}")
+                topic_summaries.append({"topic": "Unidentified Topic", "gap_count": len(texts)})
+        
+        # Sort by frequency (highest impact gaps first)
+        topic_summaries.sort(key=lambda x: x['gap_count'], reverse=True)
+        return topic_summaries
+
+    except Exception as e:
+        logger.error(f"Clustering failed: {e}", exc_info=True)
+        return []
+
+def get_learning_gap_insights(db: Session, space_id: int):
+    """
+    Main Orchestrator function called by API.
+    """
+    # 1. Fetch Logs
+    logs = fetch_recent_queries(db, space_id)
+    
+    # Require at least 5 queries to form a valid insight
+    if len(logs) < 5:
+        return {
+            "coverage_score": 0, 
+            "top_learning_gaps": [], 
+            "message": "Insufficient data (need 5+ queries)"
+        }
+
+    # 2. Analyze Scores (1 Strong OR 2 Weak)
+    # Recommended: Strong=0.65 (High confidence), Weak=0.45 (Loose relevance)
+    coverage_score, gap_logs = identify_gaps_from_logs(
+        logs, 
+        strong_threshold=0.65, 
+        weak_threshold=0.3
+    )
+
+    # 3. Cluster & Label Gaps
+    gap_topics = cluster_and_summarize_gaps(gap_logs)
+
+    # Return simplified list for frontend
+    return {
+        "coverage_score": coverage_score,
+        "top_learning_gaps": [t['topic'] for t in gap_topics],
+        "details": gap_topics 
+    }

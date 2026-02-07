@@ -22,7 +22,7 @@ from datetime import datetime
 from starlette.responses import JSONResponse, Response
 import httpx
 
-from learning_insights import get_query_clusters, analyze_cluster_coverage, summarize_gap_topics, fetch_space_queries
+from learning_insights import get_learning_gap_insights
 
 
 # Imports from your project structure
@@ -779,34 +779,17 @@ def analyze_learning_gaps(
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Only maintainers should see insights
     require_maintainer(user)
 
-    # 1. Fetch Logs
-    query_logs = fetch_space_queries(db, space_id)
-    if len(query_logs) < 5:
-        return {
-            "coverage_score": 0,
-            "top_learning_gaps": [],
-            "message": "Not enough data (min 5 queries required)"
-        } 
-
-    # 2. Cluster (Returns Dict of queries only)
-    clustered_queries = get_query_clusters(query_logs)
-
-    # 3. Check Coverage using Samples
-    coverage_score, gap_indices = analyze_cluster_coverage(
-        clustered_queries,  # Pass the dict, not centroids
-        space_id, 
-        rag_pipeline
-    )
-
-    # 4. Summarize
-    gaps = summarize_gap_topics(gap_indices, clustered_queries)
-
-    return {
-        "coverage_score": coverage_score,
-        "top_learning_gaps": gaps
-    }
+    try:
+        # One-line call to the new logic
+        insights = get_learning_gap_insights(db, space_id)
+        return insights
+        
+    except Exception as e:
+        logging.error(f"Insight generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate insights")
 
 @app.get("/spaces/{space_id}/stats", response_model=SpaceStats)
 async def get_space_stats(
