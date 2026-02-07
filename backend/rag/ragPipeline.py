@@ -645,7 +645,11 @@ class RAGPipeline:
             # Return enhanced response with backward compatibility
             return {
                 "answer": answer,
-                "sources": [source["metadata"] for source in sources],
+                "sources": [
+                    {**source["metadata"], "similarity_score": source["similarity_score"]} 
+                    for source in sources
+                ],
+                # "sources": [source["metadata"] for source in sources],
                 "tokens_used": tokens_used,
                 "context_chunks": len(retrieved_docs),
                 "query_text": query_text,

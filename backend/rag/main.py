@@ -790,15 +790,14 @@ def analyze_learning_gaps(
             "message": "Not enough data (min 5 queries required)"
         } 
 
-    # 2. Cluster
-    centroids, clustered_queries = get_query_clusters(query_logs)
+    # 2. Cluster (Returns Dict of queries only)
+    clustered_queries = get_query_clusters(query_logs)
 
-    # 3. Check Coverage using EXISTING rag_pipeline
-    # This avoids recreating the pinecone connection
+    # 3. Check Coverage using Samples
     coverage_score, gap_indices = analyze_cluster_coverage(
-        centroids, 
+        clustered_queries,  # Pass the dict, not centroids
         space_id, 
-        rag_pipeline  # Pass the global pipeline object
+        rag_pipeline
     )
 
     # 4. Summarize
@@ -808,8 +807,6 @@ def analyze_learning_gaps(
         "coverage_score": coverage_score,
         "top_learning_gaps": gaps
     }
-
-
 
 @app.get("/spaces/{space_id}/stats", response_model=SpaceStats)
 async def get_space_stats(
