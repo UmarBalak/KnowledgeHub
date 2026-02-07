@@ -4,6 +4,7 @@ import os
 import json
 from sklearn.cluster import KMeans
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
 
 from llmModels import LLM
 from models import QueryLog 
