@@ -524,6 +524,7 @@ async def query_space_documents(
         query_log = QueryLog(
             user_id=userContext.google_id,
             query_hash=query_hash,  # Privacy: hash instead of plain text
+            query_text=query_request.query,
             query_embedding=query_embedding,  # For semantic matching
             response_text=result.get("answer", ""),
             sources=result.get("sources", []),  # Store as JSON directly
@@ -813,7 +814,7 @@ def analyze_learning_gaps(
         coverage = compute_coverage(centroid, document_embeddings)
 
         if coverage < 0.75:
-            sample_queries = [query_logs[i].query_hash for i in indices[:5]]
+            sample_queries = [query_logs[i].query_text for i in indices[:5]]
             summary = summarize_gap(sample_queries)
             gaps.append(summary)
         else:
