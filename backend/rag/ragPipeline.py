@@ -594,9 +594,6 @@ class RAGPipeline:
                 * **Tables:** Use GitHub Flavored Markdown with header rows.
                 * **Lists:** Use `-` for bullets and `1.` for ordered lists.
 
-                ## CRITICAL: Output Format (JSON Only)
-                You must output a single JSON object. Do not include any preamble or markdown code blocks (like ```json) around the JSON.
-
                 The JSON must match this schema:
                 {format_instructions}
 
