@@ -63,11 +63,13 @@ class ChunkMetadata:
 
 class RAGResponse(BaseModel):
     answer: str = Field(description="The natural language answer to the user's question.")
-    relevance_status: Literal["FULL", "PARTIAL", "NONE"] = Field(
+    relevance_status: Literal["FULL", "PARTIAL", "RELATED", "NONE"] = Field(
         description="FULL: Context answered the question completely. "
-                    "PARTIAL: Context was relevant but cannot help to correctly answer the query as specific info was missing."
-                    "NONE: Context was irrelevant, answered from general knowledge."
+                    "PARTIAL: Context helped derive a partial answer. "
+                    "RELATED: Context is topically relevant, but does not contain the answer. "
+                    "NONE: Context was irrelevant."
     )
+
 class RAGPipeline:
     """
     Enhanced Retrieval-Augmented Generation Pipeline that combines:
@@ -601,10 +603,11 @@ class RAGPipeline:
                 ### JSON Field Rules:
                 1. **"answer"**: Contains the natural language response formatted in Markdown (following the Style Guidelines above). 
                 - **IMPORTANT:** You MUST properly escape all newlines (as \\n), quotes (as \\"), and special characters to ensure valid JSON.
-                2. **"relevance_status"**: 
-                - "FULL": Context answers the core question explicitly.
-                - "PARTIAL": Context was relevant but cannot help to correctly answer the query as specific info was missing.
-                - "NONE": Context is unrelated; answered from general knowledge or refused.
+                2. **"relevance_status"**: Select exactly ONE of the following:
+                - "FULL": The context contains all necessary information to answer the user's question completely.
+                - "PARTIAL": The context contains some information that helps answer part of the question, but details are missing.
+                - "RELATED": The context is about the correct topic/subject, but it does NOT contain the specific answer requested (e.g., User asks "What is the fee?", Context talks about "Course Syllabus" but not fees).
+                - "NONE": The context is completely irrelevant to the question.
 
                 ## Handling Ambiguity
                 - If a question has multiple valid interpretations, briefly list them.

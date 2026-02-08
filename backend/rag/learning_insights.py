@@ -29,79 +29,82 @@ def fetch_recent_queries(db: Session, space_id: int, limit: int = 300):
         .all()
     )
 
-def identify_gaps_from_logs(query_logs, strong_threshold=0.65, weak_threshold=0.4):
+def identify_gaps_from_logs(query_logs, strong_threshold=0.65, weak_threshold=0.45):
     """
-    Analyzes historical logs to determine coverage using LLM-Judge flags ('relevance_status')
-    OR 'One Strong OR Two Weak' vector logic for legacy logs.
+    Analyzes historical logs to determine coverage using LLM-Judge flags.
     
-    Logic:
-    1. CHECK LLM JUDGE (New Method):
-       - FULL / PARTIAL -> Pass (Covered)
-       - NONE -> Fail (Gap)
-       
-    2. FALLBACK (Old Method for legacy logs where status is UNKNOWN):
-       - 1 chunk >= strong_threshold
-       - OR 2 chunks >= weak_threshold
+    Returns:
+        full_score (int): % of queries with 'FULL' status.
+        partial_score (int): % of queries with 'PARTIAL' status.
+        effective_score (int): % of queries with 'FULL' OR 'PARTIAL' status.
+        gap_logs (list): List of queries with 'NONE' or 'RELATED' status (Content Gaps).
     """
-    gaps = []
-    covered_count = 0
+    gap_logs = []
+    count_full = 0
+    count_partial = 0
     total = len(query_logs)
 
     if total == 0:
-        return 0, []
+        return 0, 0, 0, []
 
     for log in query_logs:
-        is_covered = False
+        # Determine the standardized status for this log
+        status = 'NONE' # Default
         
-        # --- LEVEL 1: LLM-as-a-Judge (Primary Check) ---
-        # Access the new column directly. 
-        # getattr defaults to 'UNKNOWN' if for some reason the attribute is missing on an old object
-        status = getattr(log, 'relevance_status', 'UNKNOWN')
+        # 1. Try New Column (LLM Judge)
+        db_status = getattr(log, 'relevance_status', 'UNKNOWN')
         
-        if status == 'FULL':
-            is_covered = True
-        elif status == 'PARTIAL':
-            is_covered = False
-        elif status == 'NONE':
-            is_covered = False
-            
-        # --- LEVEL 2: Vector Score Fallback (Secondary Check) ---
-        # Only run this expensive logic if the status is UNKNOWN (legacy logs)
+        if db_status in ['FULL', 'PARTIAL', 'RELATED', 'NONE']:
+            status = db_status
+        
+        # 2. Legacy Fallback (Vector Scores) if status is UNKNOWN
         else:
             try:
                 sources = log.sources
-                # Handle case where sources might be stored as a string in some DBs
+                # Handle case where sources might be stored as a string
                 if isinstance(sources, str):
                     sources = json.loads(sources)
-                
                 if not isinstance(sources, list):
                     sources = []
             except Exception as e:
                 logger.warning(f"Failed to parse sources for log {log.id}: {e}")
                 sources = []
 
-            # Extract Scores
             scores = [float(s.get("similarity_score", 0.0)) for s in sources if isinstance(s, dict)]
             
-            # Rule A: The "Golden Source" (One high-quality match is enough)
+            # Map legacy scores to new statuses
             if any(s >= strong_threshold for s in scores):
-                is_covered = True
-                
-            # Rule B: The "Corroborated Evidence" (Two decent matches are enough)
+                status = 'FULL'
             elif len([s for s in scores if s >= weak_threshold]) >= 2:
-                is_covered = True
+                status = 'PARTIAL'
+            else:
+                status = 'NONE'
 
-        # --- FINAL DECISION ---
-        if is_covered:
-            covered_count += 1
-        else:
-            gaps.append(log)
+        # 3. Aggregate Stats
+        if status == 'FULL':
+            count_full += 1
+        elif status == 'PARTIAL':
+            count_partial += 1
+        
+        # 4. Identify Content Gaps
+        # NONE: completely missing. 
+        # RELATED: topic exists, but specific answer is missing (High value gap).
+        if status in ['NONE', 'RELATED']:
+            gap_logs.append(log)
 
-    # Calculate percentage
-    coverage_score = int((covered_count / total) * 100) if total > 0 else 0
-    logger.info(f"Gap Analysis: {covered_count}/{total} queries covered. Found {len(gaps)} gaps.")
+    # Calculate percentages
+    if total > 0:
+        full_score = int((count_full / total) * 100)
+        partial_score = int((count_partial / total) * 100)
+        effective_score = full_score + partial_score # Simple addition is safer than re-dividing
+    else:
+        full_score = 0
+        partial_score = 0
+        effective_score = 0
     
-    return coverage_score, gaps
+    logger.info(f"Gap Analysis: Full={full_score}%, Partial={partial_score}%, Effective={effective_score}%. Found {len(gap_logs)} gaps.")
+    
+    return full_score, partial_score, effective_score, gap_logs
 
 def cluster_and_summarize_gaps(gap_logs, n_clusters=5):
     """
@@ -112,8 +115,13 @@ def cluster_and_summarize_gaps(gap_logs, n_clusters=5):
 
     try:
         # 1. Extract Embeddings
-        # We use the embeddings already stored in the log (no new API costs)
-        embeddings = [np.array(log.query_embedding) for log in gap_logs]
+        # Ensure we filter out logs that might be missing embeddings
+        valid_logs = [log for log in gap_logs if log.query_embedding and len(log.query_embedding) > 0]
+        
+        if not valid_logs:
+            return []
+
+        embeddings = [np.array(log.query_embedding) for log in valid_logs]
         
         # Adjust cluster count if we have fewer gaps than n_clusters
         actual_k = min(n_clusters, len(embeddings))
@@ -127,7 +135,7 @@ def cluster_and_summarize_gaps(gap_logs, n_clusters=5):
         # 3. Group Text by Cluster
         clustered_texts = {i: [] for i in range(actual_k)}
         for idx, label in enumerate(labels):
-            clustered_texts[label].append(gap_logs[idx].query_text)
+            clustered_texts[label].append(valid_logs[idx].query_text)
 
         # 4. Generate Summaries with LLM
         llm = LLM(llm_model=LLM_MODEL, max_messages=0)
@@ -138,11 +146,10 @@ def cluster_and_summarize_gaps(gap_logs, n_clusters=5):
             examples = texts[:10]
             
             prompt = f"""
-            The following are user questions where our vector database found NO relevant internal documents (low similarity scores):
+            The following are user questions where our system found NO satisfactory answer (Gaps):
             
             {examples}
             
-            These questions were likely answered using the AI's general knowledge.
             Analyze them and identify the **Missing Documentation Topic**.
             Note: If the topic is purely "Chit-Chat" (e.g., greetings, jokes), ignore them.
             
@@ -153,11 +160,13 @@ def cluster_and_summarize_gaps(gap_logs, n_clusters=5):
                 response = llm.invoke(prompt)
                 topic = response.get("content", "").strip().replace('"', '').replace("'", "")
                 
-                topic_summaries.append({
-                    "topic": topic,
-                    "gap_count": len(texts), # Number of users asking about this
-                    "example_query": examples[0]
-                })
+                # Filter out pure noise if LLM identifies it
+                if "chit-chat" not in topic.lower():
+                    topic_summaries.append({
+                        "topic": topic,
+                        "gap_count": len(texts), 
+                        "example_query": examples[0]
+                    })
             except Exception as e:
                 logger.error(f"LLM Summary failed: {e}")
                 topic_summaries.append({"topic": "Unidentified Topic", "gap_count": len(texts)})
@@ -180,25 +189,28 @@ def get_learning_gap_insights(db: Session, space_id: int):
     # Require at least 5 queries to form a valid insight
     if len(logs) < 5:
         return {
-            "coverage_score": 0, 
+            "full_coverage_score": 0,
+            "partial_coverage_score": 0,
+            "effective_coverage_score": 0,
             "top_learning_gaps": [], 
             "message": "Insufficient data (need 5+ queries)"
         }
 
-    # 2. Analyze Scores (1 Strong OR 2 Weak)
-    # Recommended: Strong=0.65 (High confidence), Weak=0.45 (Loose relevance)
-    coverage_score, gap_logs = identify_gaps_from_logs(
+    # 2. Analyze Scores 
+    full_score, partial_score, effective_score, gap_logs = identify_gaps_from_logs(
         logs, 
         strong_threshold=0.65, 
-        weak_threshold=0.3
+        weak_threshold=0.45
     )
 
     # 3. Cluster & Label Gaps
     gap_topics = cluster_and_summarize_gaps(gap_logs)
 
-    # Return simplified list for frontend
+    # Return structure matching frontend expectations
     return {
-        "coverage_score": coverage_score,
+        "full_coverage_score": full_score,       # Strict (Answered completely)
+        "partial_coverage_score": partial_score, # Partial (Helpful but incomplete)
+        "effective_coverage_score": effective_score, # Total Helpful (Full + Partial)
         "top_learning_gaps": [t['topic'] for t in gap_topics],
         "details": gap_topics 
     }

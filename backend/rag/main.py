@@ -154,6 +154,7 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     query: str
     answer: str
+    relevance_status: str
     sources: List[Dict[str, Any]]
     context_chunks: int
     tokens_used: Dict[str, Any]
@@ -541,6 +542,7 @@ async def query_space_documents(
         return QueryResponse(
             query=query_request.query,
             answer=result.get('answer', ''),
+            relevance_status=relevance_status,
             sources=result.get("sources", []),
             context_chunks=result.get("context_chunks", 0),
             tokens_used=result.get("tokens_used", {}),
