@@ -29,18 +29,19 @@ def fetch_recent_queries(db: Session, space_id: int, limit: int = 300):
         .all()
     )
 
-def identify_gaps_from_logs(query_logs, strong_threshold=0.65, weak_threshold=0.45):
+def identify_gaps_from_logs(query_logs, strong_threshold=0.65, weak_threshold=0.4):
     """
-    Analyzes historical logs to determine coverage using 'One Strong OR Two Weak' logic.
+    Analyzes historical logs to determine coverage using LLM-Judge flags ('relevance_status')
+    OR 'One Strong OR Two Weak' vector logic for legacy logs.
     
     Logic:
-    1. PASS: At least one chunk has score >= strong_threshold (e.g. 0.65).
-       (Finding one perfect answer is a success).
+    1. CHECK LLM JUDGE (New Method):
+       - FULL / PARTIAL -> Pass (Covered)
+       - NONE -> Fail (Gap)
        
-    2. PASS: At least TWO chunks have score >= weak_threshold (e.g. 0.45).
-       (Finding corroborating evidence in multiple chunks is a success).
-       
-    3. FAIL (GAP): Everything else.
+    2. FALLBACK (Old Method for legacy logs where status is UNKNOWN):
+       - 1 chunk >= strong_threshold
+       - OR 2 chunks >= weak_threshold
     """
     gaps = []
     covered_count = 0
@@ -50,37 +51,49 @@ def identify_gaps_from_logs(query_logs, strong_threshold=0.65, weak_threshold=0.
         return 0, []
 
     for log in query_logs:
-        # 1. Parse Sources safely
-        try:
-            sources = log.sources
-            # Handle case where sources might be stored as a string in some DBs
-            if isinstance(sources, str):
-                sources = json.loads(sources)
-            
-            if not isinstance(sources, list):
-                sources = []
-        except Exception as e:
-            logger.warning(f"Failed to parse sources for log {log.id}: {e}")
-            sources = []
-
-        # 2. Extract Scores (default to 0.0 if missing)
-        scores = [float(s.get("similarity_score", 0.0)) for s in sources]
-        
         is_covered = False
         
-        # --- THE CORE LOGIC ---
+        # --- LEVEL 1: LLM-as-a-Judge (Primary Check) ---
+        # Access the new column directly. 
+        # getattr defaults to 'UNKNOWN' if for some reason the attribute is missing on an old object
+        status = getattr(log, 'relevance_status', 'UNKNOWN')
         
-        # Rule A: The "Golden Source" (One high-quality match is enough)
-        if any(s >= strong_threshold for s in scores):
+        if status == 'FULL':
             is_covered = True
+        elif status == 'PARTIAL':
+            # We count partial answers as "covered" because the system provided *some* value.
+            # Change to False if you want strict "All or Nothing" grading.
+            is_covered = True 
+        elif status == 'NONE':
+            is_covered = False
             
-        # Rule B: The "Corroborated Evidence" (Two decent matches are enough)
-        # This helps when no single chunk is perfect, but the topic is clearly present
-        elif len([s for s in scores if s >= weak_threshold]) >= 2:
-            is_covered = True
-            
-        # ----------------------
+        # --- LEVEL 2: Vector Score Fallback (Secondary Check) ---
+        # Only run this expensive logic if the status is UNKNOWN (legacy logs)
+        else:
+            try:
+                sources = log.sources
+                # Handle case where sources might be stored as a string in some DBs
+                if isinstance(sources, str):
+                    sources = json.loads(sources)
+                
+                if not isinstance(sources, list):
+                    sources = []
+            except Exception as e:
+                logger.warning(f"Failed to parse sources for log {log.id}: {e}")
+                sources = []
 
+            # Extract Scores
+            scores = [float(s.get("similarity_score", 0.0)) for s in sources if isinstance(s, dict)]
+            
+            # Rule A: The "Golden Source" (One high-quality match is enough)
+            if any(s >= strong_threshold for s in scores):
+                is_covered = True
+                
+            # Rule B: The "Corroborated Evidence" (Two decent matches are enough)
+            elif len([s for s in scores if s >= weak_threshold]) >= 2:
+                is_covered = True
+
+        # --- FINAL DECISION ---
         if is_covered:
             covered_count += 1
         else:

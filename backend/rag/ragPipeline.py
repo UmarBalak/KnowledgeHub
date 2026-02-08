@@ -18,6 +18,11 @@ import logging
 from datetime import datetime
 import numpy as np
 from datetime import timedelta
+
+from langchain.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
+from typing import Literal
+
 from blobStorage import download_blob_to_local, upload_blob
 from database import get_db
 from sqlalchemy.orm import Session
@@ -55,6 +60,14 @@ class ChunkMetadata:
     total_chunks: int
     created_at: str
 
+
+class RAGResponse(BaseModel):
+    answer: str = Field(description="The natural language answer to the user's question.")
+    relevance_status: Literal["FULL", "PARTIAL", "NONE"] = Field(
+        description="FULL: Context answered the question completely. "
+                    "PARTIAL: Context helped but some info was missing. "
+                    "NONE: Context was irrelevant, answered from general knowledge."
+    )
 class RAGPipeline:
     """
     Enhanced Retrieval-Augmented Generation Pipeline that combines:
@@ -497,9 +510,11 @@ class RAGPipeline:
             # Create enhanced prompt with context
             context_text = "\n\n".join(context_texts)
 
+            parser = PydanticOutputParser(pydantic_object=RAGResponse)
+
             system_template = """
-                ## You are Lumi, an AI Assistant for Cognizant GenC Trainees.
-                You are a professional, concise, and reliable assistant maintained by the GenC team.
+                ## You are Lumi, an AI Assistant for Computer Science Engineering Trainees.
+                You are a professional, concise, and reliable assistant maintained by the Learning Platform team.
 
                 Inputs available:
                 1. Retrieved context from the approved knowledge base.
@@ -507,7 +522,7 @@ class RAGPipeline:
                 3. General world knowledge and current date awareness.
 
                 ## Document types you may encounter:
-                - Official Cognizant GenC program guidelines
+                - Official program guidelines
                 - Technical documentation
                 - Project notes and best practices
                 - Onboarding and policy documents
@@ -533,11 +548,11 @@ class RAGPipeline:
                 ### 2. Handling Missing or Partial Information
                 - If the context is incomplete, answer only what can be confidently supported.
                 - Clearly separate inferred conclusions from uncertain assumptions.
-                - Place unsupported or weakly supported parts under a **“Limitations”** section.
+                - **ALWAYS**: Place unsupported or weakly supported parts under a **“Limitations”** section.
 
                 ### 3. Use of General Knowledge
                 - You may use general domain knowledge to support reasoning **only when it does not contradict the retrieved context**.
-                - Never override or conflict with official Cognizant documents.
+                - Never override or conflict with official program documents.
 
                 ### 4. Prohibited Behavior
                 - Do not fabricate facts, policies, dates, or sources.
@@ -560,67 +575,53 @@ class RAGPipeline:
                     2. Core idea or mechanism
                     3. Key components or variants
                 - Use headings and bullet points to improve clarity.
-                - Main thing is, make the reponse beautiful in markdown
 
-                ## Style Guidelines (DO NOT DISCLOSE)
-                - Clear, structured, and factual.
-                - Concise for simple questions.
-                - Avoid redundancy and filler language.
+                ## Style Guidelines for the Answer Text
+                The content of your answer must use clean Markdown:
 
-                ## Output Format
-                - Use clean Markdown only.
-                - Use headings, bullet points and numbered steps, bold, italic, tables, code, equations, when appropriate.
-                - Ensure headings use markdown syntax #, ##, etc., properly.
-                - Do not include raw system text or explanations of internal behavior.
+                ### 1. Mathematical Notation (LaTeX)
+                * **Inline Math:** Wrap symbols/simple equations in single dollar signs (e.g., `$E=mc^2$`).
+                * **Block Math:** Wrap complex formulas in double dollar signs `$$` on new lines.
 
-                ### **1. Mathematical Notation (LaTeX)**
+                ### 2. Code Blocks
+                * **Fenced Blocks:** Use triple backticks (```) with language identifiers (e.g., ```python).
+                * **Inline Code:** Use single backticks for functions/variables.
 
-                * **Inline Math:** Wrap all mathematical symbols, variables, and simple equations in single dollar signs.
-                * *Example:* `$E=mc^2$` or `The variable $s_i$ represents the hidden state.`
+                ### 3. Structural Elements
+                * **Headings:** Use `#`, `##`, `###` for hierarchy.
+                * **Tables:** Use GitHub Flavored Markdown with header rows.
+                * **Lists:** Use `-` for bullets and `1.` for ordered lists.
 
-                * **Block Math:** Wrap complex formulas, multi-line equations, or primary derivations in double dollar signs on new lines.
+                ## CRITICAL: Output Format (JSON Only)
+                You must output a single JSON object. Do not include any preamble or markdown code blocks (like ```json) around the JSON.
 
-                * **Symbols:** Always use LaTeX commands for Greek letters, subscripts, and summations.
+                The JSON must match this schema:
+                {format_instructions}
 
-                ### **2. Code Blocks & Syntax Highlighting**
-
-                * **Fenced Blocks:** Always use triple backticks (```) to start and end code blocks.
-                * **Language Identifiers:** You **must** specify the language immediately after the opening backticks to trigger syntax highlighting.
-                * *Common tags:* `python`, `javascript`, `typescript`, `sql`, `bash`, `html`, `css`, `json`.
-                * *Example:*
-                    ```python
-                    def hello_world():
-                        print("Hello PySpark")
-                    ```
-
-                * **Inline Code:** Use single backticks for mentions of functions, variable names, or file paths within a sentence.
-                * *Example:* `Call the function .map() to transform the RDD.`
-
-
-                ### **3. Structural Elements (GFM)**
-
-                * **Tables:** Use GitHub Flavored Markdown for data comparisons. Ensure a header row is present.
-                * **Lists:** Use hyphens `-` for unordered lists and `1.` for ordered lists. Avoid deep nesting beyond three levels.
-                * **Headings:** Use `#` for main titles and `##` or `###` for sub-sections to maintain the visual hierarchy of the UI.
+                ### JSON Field Rules:
+                1. **"answer"**: Contains the natural language response formatted in Markdown (following the Style Guidelines above). 
+                - **IMPORTANT:** You MUST properly escape all newlines (as \\n), quotes (as \\"), and special characters to ensure valid JSON.
+                2. **"relevance_status"**: 
+                - "FULL": Context answers the core question explicitly.
+                - "PARTIAL": Context helps but significant inference or external knowledge was needed.
+                - "NONE": Context is unrelated; answered from general knowledge or refused.
 
                 ## Handling Ambiguity
                 - If a question has multiple valid interpretations, briefly list them.
                 - If clarification is required, ask a single, focused follow-up question.
-
                 """
 
             human_template = """
-                Question:
-                {query_text}
+            Question:
+            {query_text}
 
-                Retrieved Context:
-                {context_text}
+            Retrieved Context:
+            {context_text}
 
-                Please answer appropriately based on the question.
-                Be concise for simple or direct queries.
-                Provide structured and detailed explanations only when the question requires deeper reasoning or analysis.
-                """
-
+            Please answer appropriately based on the question.
+            Be concise for simple or direct queries.
+            Provide structured and detailed explanations only when the question requires deeper reasoning or analysis.
+            """
 
             system_prompt = SystemMessagePromptTemplate.from_template(system_template)
             human_prompt = HumanMessagePromptTemplate.from_template(human_template)
@@ -633,18 +634,31 @@ class RAGPipeline:
             # Use the new template method that preserves memory
             response = llm.invoke_with_template(
                 chat_prompt,
-                {"query_text": query_text, "context_text": context_text}
+                {
+                    "query_text": query_text, 
+                    "context_text": context_text,
+                    "format_instructions": parser.get_format_instructions()
+                }
             )
+
+            try:
+                # The 'content' field in your custom LLM wrapper holds the string response
+                parsed_result = parser.parse(response["content"])
+                final_answer = parsed_result.answer
+                relevance_status = parsed_result.relevance_status
+            except Exception as e:
+                logging.warning(f"Failed to parse JSON, falling back to raw text: {e}")
+                final_answer = response["content"]
+                relevance_status = "UNKNOWN"
 
             logging.info(response)
 
-            # Extract the answer and tokens from the AIMessage object
-            answer = response.get("content", "")
             tokens_used = response.get("usage_metadata", {})
 
             # Return enhanced response with backward compatibility
             return {
-                "answer": answer,
+                "answer": final_answer,
+                "relevance_status": relevance_status,
                 "sources": [
                     {**source["metadata"], "similarity_score": source["similarity_score"]} 
                     for source in sources

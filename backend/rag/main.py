@@ -509,6 +509,8 @@ async def query_space_documents(
             space_id=space_id,
             llm_override=llm
         )
+
+        relevance_status = result.get("relevance_status", "UNKNOWN")
         
         response_time = time.time() - start_time
         
@@ -521,6 +523,7 @@ async def query_space_documents(
             query_text=query_request.query,
             query_embedding=query_embedding,  # For semantic matching
             response_text=result.get("answer", ""),
+            relevance_status=relevance_status,
             sources=result.get("sources", []),  # Store as JSON directly
             tokens_used=result.get("tokens_used", {}),
             response_time=response_time,

@@ -145,6 +145,7 @@ class QueryLog(Base):
     query_text = Column(Text, nullable=False)  
     query_embedding = Column(JSON, nullable=False)  # Vector for semantic matching
     response_text = Column(Text, nullable=False)
+    relevance_status = Column(String(36), nullable=False)
     sources = Column(JSON, nullable=True)
     tokens_used = Column(JSON)
     response_time = Column(Float)
