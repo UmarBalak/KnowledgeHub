@@ -65,7 +65,7 @@ class RAGResponse(BaseModel):
     answer: str = Field(description="The natural language answer to the user's question.")
     relevance_status: Literal["FULL", "PARTIAL", "NONE"] = Field(
         description="FULL: Context answered the question completely. "
-                    "PARTIAL: Context helped but some info was missing. "
+                    "PARTIAL: Context was relevant but cannot help to correctly answer the query as specific info was missing."
                     "NONE: Context was irrelevant, answered from general knowledge."
     )
 class RAGPipeline:
@@ -603,7 +603,7 @@ class RAGPipeline:
                 - **IMPORTANT:** You MUST properly escape all newlines (as \\n), quotes (as \\"), and special characters to ensure valid JSON.
                 2. **"relevance_status"**: 
                 - "FULL": Context answers the core question explicitly.
-                - "PARTIAL": Context helps but significant inference or external knowledge was needed.
+                - "PARTIAL": Context was relevant but cannot help to correctly answer the query as specific info was missing.
                 - "NONE": Context is unrelated; answered from general knowledge or refused.
 
                 ## Handling Ambiguity
