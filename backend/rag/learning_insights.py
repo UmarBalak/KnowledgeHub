@@ -61,9 +61,7 @@ def identify_gaps_from_logs(query_logs, strong_threshold=0.65, weak_threshold=0.
         if status == 'FULL':
             is_covered = True
         elif status == 'PARTIAL':
-            # We count partial answers as "covered" because the system provided *some* value.
-            # Change to False if you want strict "All or Nothing" grading.
-            is_covered = True 
+            is_covered = False
         elif status == 'NONE':
             is_covered = False
             
