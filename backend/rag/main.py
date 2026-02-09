@@ -31,6 +31,7 @@ from models import Space, SpaceMembership, Document, DocumentChunk, QueryLog, Ch
 from ragPipeline import RAGPipeline
 from blobStorage import upload_blob, delete_blob, extract_filename_from_url
 from pydantic import BaseModel, Field
+from typing import Literal
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
@@ -154,7 +155,7 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     query: str
     answer: str
-    relevance_status: str
+    relevance_status: Literal["FULL", "PARTIAL", "RELATED", "NONE", "UNKNOWN"]
     sources: List[Dict[str, Any]]
     context_chunks: int
     tokens_used: Dict[str, Any]
@@ -490,11 +491,25 @@ async def query_space_documents(
         if cached_result:
             response_time = time.time() - start_time
             logging.info(f"✅ Returned cached response in {response_time:.2f}s")
+
+
+            status = cached_result.get("relevance_status")
+
+            if not isinstance(status, str):
+                status = "UNKNOWN"
+            else:
+                status = status.upper()
+
+            VALID_STATUSES = {"FULL", "PARTIAL", "RELATED", "NONE", "UNKNOWN"}
+
+            if status not in VALID_STATUSES:
+                status = "UNKNOWN"
+
             
             return QueryResponse(
                 query=query_request.query,
                 answer=cached_result["answer"],
-                relevance_status=cached_result.get("relevance_status"),
+                relevance_status=status,
                 sources=cached_result["sources"],
                 context_chunks=cached_result["context_chunks"],
                 tokens_used=cached_result["tokens_used"]
