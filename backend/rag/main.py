@@ -494,6 +494,7 @@ async def query_space_documents(
             return QueryResponse(
                 query=query_request.query,
                 answer=cached_result["answer"],
+                relevance_status=cached_result.get("relevance_status"),
                 sources=cached_result["sources"],
                 context_chunks=cached_result["context_chunks"],
                 tokens_used=cached_result["tokens_used"]
